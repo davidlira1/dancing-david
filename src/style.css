@@ -37,7 +37,7 @@ h1 {
 }
 
 #webcam,
-#segmentation,
+#aura,
 #overlay {
   display: block;
 }
@@ -47,7 +47,7 @@ h1 {
   height: auto;
 }
 
-#segmentation,
+#aura,
 #overlay {
   position: absolute;
   inset: 0;
@@ -55,7 +55,7 @@ h1 {
   height: 100%;
 }
 
-#segmentation {
+#aura {
   z-index: 1;
 }
 

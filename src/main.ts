@@ -1,13 +1,13 @@
 import "./style.css";
+import { drawAura } from "./aura.ts";
 import { startCamera } from "./camera.ts";
 import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
-import { drawSegmentation } from "./segmentation.ts";
+import { updatePersonMask } from "./segmentation.ts";
 
 const video = document.querySelector<HTMLVideoElement>("#webcam")!;
 const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
-const segmentationCanvas =
-  document.querySelector<HTMLCanvasElement>("#segmentation")!;
+const auraCanvas = document.querySelector<HTMLCanvasElement>("#aura")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
@@ -33,7 +33,8 @@ async function main(): Promise<void> {
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
           detectPose(landmarker, video, performance.now(), (result) => {
-            drawSegmentation(segmentationCanvas, video, result);
+            const mask = updatePersonMask(result);
+            drawAura(auraCanvas, video, mask);
             drawPose(overlayCanvas, video, result);
           });
         }
