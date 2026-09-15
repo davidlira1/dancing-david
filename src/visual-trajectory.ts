@@ -1,4 +1,10 @@
 import { createDepthTracker, type DepthSnapshot } from "./depth.ts";
+import type { SceneDepth } from "./scene-depth.ts";
+import {
+  createStrokeContinuity,
+  type ContinuityDebug,
+  type ContinuityThresholds,
+} from "./stroke-continuity.ts";
 import { MIN_VISIBILITY } from "./wrist-history.ts";
 
 export const POSITION_SMOOTHING_TAU_MS = 25;
@@ -11,12 +17,18 @@ export const VISUAL_CONFIDENT_VISIBILITY = 0.65;
 export const VISUAL_UNTRUSTED_TAU_MULT = 1.25;
 export const VISUAL_UNTRUSTED_STEP_SCALE = 0.75;
 
-export type VisualSample = {
+/** A raw wrist observation handed to the trajectory. */
+export type WristObservation = {
   x: number;
   y: number;
   z?: number;
   t: number;
   visibility?: number;
+};
+
+/** A stored sample. `strokeId` marks which continuous stroke it belongs to. */
+export type VisualSample = WristObservation & {
+  strokeId: number;
 };
 
 export type JumpDebug = {
@@ -36,7 +48,10 @@ function prune(
   }
 }
 
-function distance(a: VisualSample, b: VisualSample): number {
+function distance(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
@@ -86,21 +101,25 @@ export function clampVisualJump(
   };
 }
 
-export function createVisualTrajectory() {
+export function createVisualTrajectory(scene: SceneDepth) {
   const points: VisualSample[] = [];
-  const depth = createDepthTracker();
+  const depth = createDepthTracker(scene);
+  const continuity = createStrokeContinuity();
   let smoothed: { x: number; y: number; t: number } | null = null;
   let recentRawSpeed = 0;
   let durationMs = VISUAL_TRAIL_DURATION_MS;
   let jumpDebug: JumpDebug = { clamped: false, requested: 0, allowed: 0 };
+  let currentStrokeId = 0;
 
   function pushFiltered(point: VisualSample): void {
-    if (points.length === 0) {
+    const prev = points[points.length - 1];
+    // Densify only inside one stroke. Interpolating across a stroke boundary
+    // would invent trajectory through unobserved tracking.
+    if (!prev || prev.strokeId !== point.strokeId) {
       points.push(point);
       return;
     }
 
-    const prev = points[points.length - 1];
     const gap = distance(prev, point);
     const steps = Math.min(MAX_INTERP, Math.floor(gap / MAX_SPACING));
 
@@ -111,22 +130,50 @@ export function createVisualTrajectory() {
         y: prev.y + (point.y - prev.y) * u,
         z: (prev.z ?? 0) + ((point.z ?? 0) - (prev.z ?? 0)) * u,
         t: prev.t + (point.t - prev.t) * u,
+        strokeId: point.strokeId,
       });
     }
 
     points.push(point);
   }
 
+  function zeroHistoricalDepth(): void {
+    for (let i = 0; i < points.length; i++) {
+      points[i].z = 0;
+    }
+  }
+
   return {
-    update(point: VisualSample): void {
+    update(point: WristObservation): void {
       prune(points, point.t, durationMs);
+
+      // Compare unfiltered tracked depth so a real jump is not smeared away by
+      // the One Euro filter before continuity can see it.
+      const verdict = continuity.evaluate(
+        {
+          x: point.x,
+          y: point.y,
+          trackedDepth: scene.toTracked(point.z ?? 0),
+          t: point.t,
+          visibility: point.visibility ?? 0,
+        },
+        recentRawSpeed,
+        scene.isReady(),
+      );
+
+      if (verdict.startNewStroke) {
+        depth.resetFilter();
+      }
+      currentStrokeId = verdict.strokeId;
       const depthSnap = depth.update(
         point.z ?? 0,
         point.t,
         point.visibility ?? 0,
       );
 
-      if (!smoothed) {
+      if (verdict.startNewStroke || !smoothed) {
+        // Start the new stroke exactly at the wrist: no easing from the old
+        // endpoint, so the ribbon emerges from the hand.
         smoothed = { x: point.x, y: point.y, t: point.t };
         recentRawSpeed = 0;
         jumpDebug = { clamped: false, requested: 0, allowed: VISUAL_JUMP_DISTANCE };
@@ -136,6 +183,7 @@ export function createVisualTrajectory() {
           z: depthSnap.trackedDepth,
           t: point.t,
           visibility: point.visibility,
+          strokeId: currentStrokeId,
         });
         return;
       }
@@ -175,7 +223,14 @@ export function createVisualTrajectory() {
         z: depthSnap.trackedDepth,
         t: point.t,
         visibility: point.visibility,
+        strokeId: currentStrokeId,
       });
+    },
+
+    /** A vision frame that produced no usable wrist. Appends no geometry. */
+    noteMissedFrame(timestampMs: number, visibility: number): void {
+      continuity.noteMissedFrame(timestampMs, visibility);
+      prune(points, timestampMs, durationMs);
     },
 
     prune(timestampMs: number): void {
@@ -186,28 +241,57 @@ export function createVisualTrajectory() {
       durationMs = Math.max(1, ms);
     },
 
-    setInvertZ(value: boolean): void {
-      if (!depth.setInvertZ(value)) {
-        return;
-      }
+    setViewport(width: number, height: number): void {
+      continuity.setViewport(width, height);
+    },
+
+    setContinuityThresholds(next: Partial<ContinuityThresholds>): void {
+      continuity.setThresholds(next);
+    },
+
+    handleSceneInvert(): void {
+      depth.negateTracked();
       for (let i = 0; i < points.length; i++) {
         points[i].z = -(points[i].z ?? 0);
       }
     },
 
-    recalibrateDepth(): void {
-      depth.recalibrate();
-      for (let i = 0; i < points.length; i++) {
-        points[i].z = 0;
-      }
+    handleSceneRecalibrate(): void {
+      depth.resetFilter();
+      zeroHistoricalDepth();
     },
 
     depthSnapshot(): DepthSnapshot {
       return depth.snapshot();
     },
 
+    continuityDebug(): ContinuityDebug {
+      return continuity.debug();
+    },
+
     samples(): readonly VisualSample[] {
       return points;
+    },
+
+    /** First sample of each live stroke, oldest first. */
+    strokeStarts(): VisualSample[] {
+      const starts: VisualSample[] = [];
+      for (let i = 0; i < points.length; i++) {
+        if (i === 0 || points[i].strokeId !== points[i - 1].strokeId) {
+          starts.push(points[i]);
+        }
+      }
+      return starts;
+    },
+
+    strokeCount(): number {
+      let count = 0;
+      for (let i = 0; i < points.length; i++) {
+        if (i === 0 || points[i].strokeId !== points[i - 1].strokeId) {
+          count += 1;
+        }
+      }
+      return count;
     },
 
     jumpDebug(): JumpDebug {
@@ -219,7 +303,8 @@ export function createVisualTrajectory() {
       smoothed = null;
       recentRawSpeed = 0;
       jumpDebug = { clamped: false, requested: 0, allowed: 0 };
-      depth.recalibrate();
+      depth.resetFilter();
+      continuity.reset();
     },
   };
 }

@@ -107,6 +107,38 @@ export function formatTrackingDebug(snapshot: TrackingDebugSnapshot): string {
   );
 }
 
+/**
+ * Marks where each live stroke begins, so a tracking break is visible as a
+ * fresh start point rather than having to be inferred from ribbon shape.
+ */
+export function drawStrokeDebug(
+  canvas: HTMLCanvasElement,
+  video: HTMLVideoElement,
+  starts: readonly MarkerPoint[],
+  clear: boolean,
+): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return;
+  }
+
+  sizeToVideo(canvas, video);
+  if (clear) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  const size = MARKER_RADIUS * 2;
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ff8a3d";
+  for (let i = 0; i < starts.length; i++) {
+    const point = toPixels(starts[i], canvas.width, canvas.height, true);
+    ctx.strokeRect(point.x - size, point.y - size, size * 2, size * 2);
+  }
+  ctx.restore();
+}
+
 export function drawTrackingDebug(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,

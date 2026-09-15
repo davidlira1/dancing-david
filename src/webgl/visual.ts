@@ -1,5 +1,11 @@
 /** Tunable ribbon + bloom look. Tracking constants live in visual-trajectory.ts. */
 
+import {
+  MAX_REACQUIRE_DISTANCE_PX,
+  MAX_TRACKING_GAP_MS,
+  MIN_CONTINUITY_VISIBILITY,
+} from "../stroke-continuity.ts";
+
 export const RIBBON_WIDTH = 32;
 export const CORE_WIDTH = 0.11;
 export const EDGE_SOFTNESS = 0.28;
@@ -12,6 +18,10 @@ export const PERSPECTIVE_STRENGTH = 1.15;
 export const MIN_PERSPECTIVE_SCALE = 0.55;
 export const MAX_PERSPECTIVE_SCALE = 1.85;
 export const DEPTH_BLOOM_STRENGTH = 0.22;
+export const OCCLUSION_DEPTH_BIAS = 0.04;
+export const OCCLUSION_SOFTNESS = 0.05;
+export const SEGMENTATION_THRESHOLD = 0.25;
+export const BODY_INFLUENCE_RADIUS = 0.18;
 
 export const BLOOM_SCALE = 0.5;
 export const BLOOM_RADIUS = 2.4;
@@ -88,6 +98,18 @@ export type RibbonVfxConfig = {
   depthBloomStrength: number;
   depthViz: boolean;
   invertZ: boolean;
+  occlusionEnabled: boolean;
+  occlusionDepthBias: number;
+  occlusionSoftness: number;
+  segmentationThreshold: number;
+  bodyInfluenceRadius: number;
+  segmentationDebug: boolean;
+  bodyDepthDebug: boolean;
+  occlusionViz: boolean;
+  continuityGapMs: number;
+  continuityReacquirePx: number;
+  minContinuityVisibility: number;
+  strokeDebug: boolean;
 };
 
 function clamp01(value: number): number {
@@ -149,6 +171,18 @@ export const DEFAULT_RIBBON_VFX_CONFIG: RibbonVfxConfig = {
   depthBloomStrength: DEPTH_BLOOM_STRENGTH,
   depthViz: false,
   invertZ: true,
+  occlusionEnabled: true,
+  occlusionDepthBias: OCCLUSION_DEPTH_BIAS,
+  occlusionSoftness: OCCLUSION_SOFTNESS,
+  segmentationThreshold: SEGMENTATION_THRESHOLD,
+  bodyInfluenceRadius: BODY_INFLUENCE_RADIUS,
+  segmentationDebug: false,
+  bodyDepthDebug: false,
+  occlusionViz: false,
+  continuityGapMs: MAX_TRACKING_GAP_MS,
+  continuityReacquirePx: MAX_REACQUIRE_DISTANCE_PX,
+  minContinuityVisibility: MIN_CONTINUITY_VISIBILITY,
+  strokeDebug: false,
 };
 
 export function createRibbonVfxConfig(): RibbonVfxConfig {
@@ -189,6 +223,18 @@ export function assignRibbonVfxConfig(
   target.depthBloomStrength = source.depthBloomStrength;
   target.depthViz = source.depthViz;
   target.invertZ = source.invertZ;
+  target.occlusionEnabled = source.occlusionEnabled;
+  target.occlusionDepthBias = source.occlusionDepthBias;
+  target.occlusionSoftness = source.occlusionSoftness;
+  target.segmentationThreshold = source.segmentationThreshold;
+  target.bodyInfluenceRadius = source.bodyInfluenceRadius;
+  target.segmentationDebug = source.segmentationDebug;
+  target.bodyDepthDebug = source.bodyDepthDebug;
+  target.occlusionViz = source.occlusionViz;
+  target.continuityGapMs = source.continuityGapMs;
+  target.continuityReacquirePx = source.continuityReacquirePx;
+  target.minContinuityVisibility = source.minContinuityVisibility;
+  target.strokeDebug = source.strokeDebug;
 }
 
 export const THIN_RIBBON_VFX_PRESET: RibbonVfxConfig = {

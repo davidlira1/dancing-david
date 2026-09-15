@@ -160,6 +160,77 @@ Last event: —</pre>
                   <span>CLOSER</span>
                 </div>
               </div>
+              <p class="vfx-section">Occlusion</p>
+              <label class="vfx-check">
+                <input id="vfx-occlusionEnabled" type="checkbox" />
+                <span>Occlusion Enabled</span>
+              </label>
+              <label>
+                <span>Occlusion Depth Bias</span>
+                <span class="vfx-row">
+                  <input id="vfx-occlusionDepthBias" type="range" min="0" max="0.2" step="0.005" />
+                  <span id="vfx-occlusionDepthBias-value">0.04</span>
+                </span>
+              </label>
+              <label>
+                <span>Occlusion Softness</span>
+                <span class="vfx-row">
+                  <input id="vfx-occlusionSoftness" type="range" min="0" max="0.2" step="0.005" />
+                  <span id="vfx-occlusionSoftness-value">0.05</span>
+                </span>
+              </label>
+              <label>
+                <span>Segmentation Threshold</span>
+                <span class="vfx-row">
+                  <input id="vfx-segmentationThreshold" type="range" min="0" max="0.8" step="0.01" />
+                  <span id="vfx-segmentationThreshold-value">0.25</span>
+                </span>
+              </label>
+              <label>
+                <span>Body Depth Influence Radius</span>
+                <span class="vfx-row">
+                  <input id="vfx-bodyInfluenceRadius" type="range" min="0.04" max="0.4" step="0.01" />
+                  <span id="vfx-bodyInfluenceRadius-value">0.18</span>
+                </span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-segmentationDebug" type="checkbox" />
+                <span>Segmentation Debug</span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-bodyDepthDebug" type="checkbox" />
+                <span>Body Depth Debug</span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-occlusionViz" type="checkbox" />
+                <span>Occlusion Decision Debug</span>
+              </label>
+              <p class="vfx-section">Tracking Continuity</p>
+              <label>
+                <span>Max Tracking Gap</span>
+                <span class="vfx-row">
+                  <input id="vfx-continuityGapMs" type="range" min="40" max="600" step="10" />
+                  <span id="vfx-continuityGapMs-value">150 ms</span>
+                </span>
+              </label>
+              <label>
+                <span>Reacquire Distance</span>
+                <span class="vfx-row">
+                  <input id="vfx-continuityReacquirePx" type="range" min="20" max="600" step="10" />
+                  <span id="vfx-continuityReacquirePx-value">180 px</span>
+                </span>
+              </label>
+              <label>
+                <span>Min Continuity Visibility</span>
+                <span class="vfx-row">
+                  <input id="vfx-minContinuityVisibility" type="range" min="0.1" max="0.9" step="0.01" />
+                  <span id="vfx-minContinuityVisibility-value">0.50</span>
+                </span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-strokeDebug" type="checkbox" />
+                <span>Stroke Debug</span>
+              </label>
               <p class="vfx-section">Color</p>
               <label>
                 <span>Core Color</span>

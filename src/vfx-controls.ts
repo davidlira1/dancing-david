@@ -30,6 +30,13 @@ const SLIDERS: SliderSpec[] = [
   { key: "minPerspectiveScale", suffix: "", digits: 2 },
   { key: "maxPerspectiveScale", suffix: "", digits: 2 },
   { key: "depthBloomStrength", suffix: "", digits: 2 },
+  { key: "occlusionDepthBias", suffix: "", digits: 3 },
+  { key: "occlusionSoftness", suffix: "", digits: 3 },
+  { key: "segmentationThreshold", suffix: "", digits: 2 },
+  { key: "bodyInfluenceRadius", suffix: "", digits: 2 },
+  { key: "continuityGapMs", suffix: " ms", digits: 0 },
+  { key: "continuityReacquirePx", suffix: " px", digits: 0 },
+  { key: "minContinuityVisibility", suffix: "", digits: 2 },
 ];
 
 const COLOR_KEYS = [
@@ -39,7 +46,16 @@ const COLOR_KEYS = [
   "bloomColor",
 ] as const;
 
-const CHECKBOX_KEYS = ["depthEnabled", "depthViz", "invertZ"] as const;
+const CHECKBOX_KEYS = [
+  "depthEnabled",
+  "depthViz",
+  "invertZ",
+  "occlusionEnabled",
+  "segmentationDebug",
+  "bodyDepthDebug",
+  "occlusionViz",
+  "strokeDebug",
+] as const;
 
 const DEPTH_METER_RANGE = 0.4;
 
@@ -57,7 +73,7 @@ export function createVfxControls(options: {
   onRecalibrate: () => void;
 }): {
   syncFromConfig: () => void;
-  updateDepthMeter: (snapshot: DepthSnapshot) => void;
+  updateDepthMeter: (snapshot: DepthSnapshot, extra?: string) => void;
 } {
   const { config, onChange, onRecalibrate } = options;
   const panel = document.querySelector<HTMLElement>("#ribbon-vfx")!;
@@ -205,17 +221,18 @@ export function createVfxControls(options: {
 
   return {
     syncFromConfig,
-    updateDepthMeter(snapshot: DepthSnapshot): void {
+    updateDepthMeter(snapshot: DepthSnapshot, extra?: string): void {
       const { visualDepth, perspectiveScale } = ribbonPerspectiveFromTracked(
         snapshot.trackedDepth,
         config,
       );
       if (depthDebug) {
-        depthDebug.textContent = formatDepthDebug({
-          ...snapshot,
-          visualDepth,
-          perspectiveScale,
-        });
+        depthDebug.textContent =
+          formatDepthDebug({
+            ...snapshot,
+            visualDepth,
+            perspectiveScale,
+          }) + (extra ? `\n${extra}` : "");
       }
       if (depthMarker) {
         const t = snapshot.calibrating

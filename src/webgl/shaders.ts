@@ -16,6 +16,7 @@ out float v_side;
 out float v_life;
 out float v_depth;
 out float v_perspective;
+out vec2 v_uv;
 
 void main() {
   float widthScale = mix(u_minWidthScale, 1.0, smoothstep(0.0, 1.0, a_life));
@@ -30,6 +31,7 @@ void main() {
   v_life = a_life;
   v_depth = a_depth;
   v_perspective = a_perspective;
+  v_uv = vec2(pos.x / u_resolution.x, pos.y / u_resolution.y);
 }
 `;
 
@@ -40,6 +42,7 @@ in float v_side;
 in float v_life;
 in float v_depth;
 in float v_perspective;
+in vec2 v_uv;
 out vec4 fragColor;
 
 uniform float u_coreWidth;
@@ -49,6 +52,17 @@ uniform float u_intensity;
 uniform float u_depthEnabled;
 uniform float u_depthViz;
 uniform float u_depthBloomStrength;
+uniform float u_occlusionEnabled;
+uniform float u_occlusionBias;
+uniform float u_occlusionSoftness;
+uniform float u_segThreshold;
+uniform float u_headAttach;
+uniform float u_hasMask;
+uniform float u_calibrated;
+uniform float u_occlusionViz;
+uniform float u_depthPackRange;
+uniform sampler2D u_personMask;
+uniform sampler2D u_bodyDepth;
 uniform vec3 u_coreColor;
 uniform vec3 u_cyan;
 uniform vec3 u_blue;
@@ -76,12 +90,40 @@ void main() {
     color = viz + u_coreColor * core * 0.35;
   }
 
+  vec2 maskUv = vec2(v_uv.x, 1.0 - v_uv.y);
+  float person = texture(u_personMask, maskUv).a;
+  vec4 bodyTex = texture(u_bodyDepth, maskUv);
+  float bodyZ = bodyTex.r * 2.0 * u_depthPackRange - u_depthPackRange;
+  float bodyValid = bodyTex.g;
+  float depthFactor = 1.0;
+  if (bodyValid > 0.5) {
+    float delta = v_depth - bodyZ;
+    float lo = -(u_occlusionBias + u_occlusionSoftness);
+    float hi = u_occlusionBias + u_occlusionSoftness;
+    depthFactor = smoothstep(lo, hi, delta);
+  }
+  float personAmt = smoothstep(u_segThreshold, 1.0, person);
+  float occ = mix(1.0, depthFactor, personAmt);
+  float attach = smoothstep(1.0 - u_headAttach, 1.0, v_life);
+  occ = mix(occ, 1.0, attach);
+  if (u_occlusionEnabled < 0.5 || u_hasMask < 0.5 || u_calibrated < 0.5) {
+    occ = 1.0;
+  }
+
+  if (u_occlusionViz > 0.5) {
+    vec3 decision = vec3(0.2, 0.95, 0.28);
+    decision = mix(vec3(1.0, 0.85, 0.12), decision, smoothstep(0.35, 0.8, depthFactor));
+    decision = mix(vec3(1.0, 0.18, 0.16), decision, smoothstep(0.2, 0.55, depthFactor));
+    color = mix(color, decision, mix(0.25, 1.0, personAmt));
+  }
+
   float edgeStart = max(0.0, 1.0 - u_edgeSoftness);
   float edgeAlpha = 1.0 - smoothstep(edgeStart, 1.0, d);
   float lifeAlpha = smoothstep(0.0, u_tailFadeEnd, v_life);
   float depthGlow = mix(1.0, clamp(v_perspective, 0.72, 1.35), u_depthBloomStrength * u_depthEnabled);
-  float alpha = edgeAlpha * lifeAlpha * u_intensity * mix(1.0, 1.2, core) * depthGlow;
-  fragColor = vec4(color, alpha);
+  float hide = u_occlusionViz > 0.5 ? 1.0 : occ;
+  float alpha = edgeAlpha * lifeAlpha * u_intensity * mix(1.0, 1.2, core) * depthGlow * hide;
+  fragColor = vec4(color * hide, alpha);
 }
 `;
 

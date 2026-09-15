@@ -63,21 +63,16 @@ function neighborhoodSmooth(points: Point[]): Point[] {
   return smoothed;
 }
 
-export function buildTrailGeometry(
-  samples: readonly VisualSample[],
-  nowMs: number,
+function buildStroke(
+  stroke: VisualSample[],
   width: number,
   height: number,
-  durationMs = VISUAL_TRAIL_DURATION_MS,
 ): TimedSegment[] {
-  const alive = samples.filter(
-    (sample) => nowMs - sample.t <= durationMs,
-  );
-  if (alive.length < 2) {
+  if (stroke.length < 2) {
     return [];
   }
 
-  const points = neighborhoodSmooth(toPixels(alive, width, height));
+  const points = neighborhoodSmooth(toPixels(stroke, width, height));
   const cubics = catmullRomToBezierPath(points);
   const timed: TimedSegment[] = [];
   for (let i = 0; i < cubics.length; i++) {
@@ -88,4 +83,43 @@ export function buildTrailGeometry(
     });
   }
   return timed;
+}
+
+/**
+ * One cubic list per continuous stroke, oldest first. Samples are grouped by
+ * `strokeId` before smoothing so no control point, tangent, or smoothing
+ * window ever spans a tracking gap.
+ */
+export function buildTrailGeometry(
+  samples: readonly VisualSample[],
+  nowMs: number,
+  width: number,
+  height: number,
+  durationMs = VISUAL_TRAIL_DURATION_MS,
+): TimedSegment[][] {
+  const strokes: TimedSegment[][] = [];
+  let current: VisualSample[] = [];
+
+  function flush(): void {
+    const segments = buildStroke(current, width, height);
+    if (segments.length > 0) {
+      strokes.push(segments);
+    }
+    current = [];
+  }
+
+  for (let i = 0; i < samples.length; i++) {
+    const sample = samples[i];
+    if (nowMs - sample.t > durationMs) {
+      continue;
+    }
+    const prev = current[current.length - 1];
+    if (prev && prev.strokeId !== sample.strokeId) {
+      flush();
+    }
+    current.push(sample);
+  }
+  flush();
+
+  return strokes;
 }

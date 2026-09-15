@@ -1,5 +1,11 @@
 import { flattenCubic } from "../spline.ts";
 import type { TimedSegment } from "../trail.ts";
+import {
+  HEAD_ATTACH_MS,
+  TRACKED_DEPTH_PACK_RANGE,
+  type BodyDepthField,
+} from "../body-depth.ts";
+import type { PersonMask } from "../segmentation.ts";
 import { createBloomRenderer, type BloomRenderer } from "./bloom-renderer.ts";
 import {
   disposeFrameTarget,
@@ -43,15 +49,23 @@ export type RibbonStats = {
   bloomHeight: number;
 };
 
+/** One continuous stroke: cubics that are guaranteed not to span a tracking gap. */
+export type RibbonStroke = TimedSegment[];
+
 export type RibbonTrails = {
-  right: TimedSegment[];
-  left: TimedSegment[];
+  right: RibbonStroke[];
+  left: RibbonStroke[];
 };
 
 export type RibbonRenderer = {
   resize(videoWidth: number, videoHeight: number, dpr: number): void;
+  setOcclusionSources(
+    mask: PersonMask | null,
+    body: BodyDepthField | null,
+    calibrated: boolean,
+  ): void;
   render(trails: RibbonTrails, nowMs: number, vfx: RibbonVfxConfig): void;
-  lastHead(): { x: number; y: number } | null;
+  lastHead(): { x: number; y: number; z: number } | null;
   stats(): RibbonStats;
   dispose(): void;
 };
@@ -381,6 +395,50 @@ export function createRibbonRenderer(
   gpu.bindVertexArray(null);
   gpu.bindBuffer(gpu.ARRAY_BUFFER, null);
 
+  const personMaskTexture = gpu.createTexture();
+  const bodyDepthTexture = gpu.createTexture();
+  if (!personMaskTexture || !bodyDepthTexture) {
+    gpu.deleteBuffer(buffer);
+    gpu.deleteVertexArray(vao);
+    gpu.deleteProgram(program);
+    bloom.dispose();
+    return null;
+  }
+
+  function configureTexture(texture: WebGLTexture): void {
+    gpu.bindTexture(gpu.TEXTURE_2D, texture);
+    gpu.texParameteri(gpu.TEXTURE_2D, gpu.TEXTURE_MIN_FILTER, gpu.LINEAR);
+    gpu.texParameteri(gpu.TEXTURE_2D, gpu.TEXTURE_MAG_FILTER, gpu.LINEAR);
+    gpu.texParameteri(gpu.TEXTURE_2D, gpu.TEXTURE_WRAP_S, gpu.CLAMP_TO_EDGE);
+    gpu.texParameteri(gpu.TEXTURE_2D, gpu.TEXTURE_WRAP_T, gpu.CLAMP_TO_EDGE);
+  }
+
+  configureTexture(personMaskTexture);
+  gpu.texImage2D(
+    gpu.TEXTURE_2D,
+    0,
+    gpu.RGBA,
+    1,
+    1,
+    0,
+    gpu.RGBA,
+    gpu.UNSIGNED_BYTE,
+    new Uint8Array([0, 0, 0, 0]),
+  );
+  configureTexture(bodyDepthTexture);
+  gpu.texImage2D(
+    gpu.TEXTURE_2D,
+    0,
+    gpu.RGBA,
+    1,
+    1,
+    0,
+    gpu.RGBA,
+    gpu.UNSIGNED_BYTE,
+    new Uint8Array([128, 0, 0, 0]),
+  );
+  gpu.bindTexture(gpu.TEXTURE_2D, null);
+
   const uResolution = gpu.getUniformLocation(program, "u_resolution");
   const uMaxWidth = gpu.getUniformLocation(program, "u_maxWidth");
   const uMinWidthScale = gpu.getUniformLocation(program, "u_minWidthScale");
@@ -394,6 +452,20 @@ export function createRibbonRenderer(
     program,
     "u_depthBloomStrength",
   );
+  const uOcclusionEnabled = gpu.getUniformLocation(program, "u_occlusionEnabled");
+  const uOcclusionBias = gpu.getUniformLocation(program, "u_occlusionBias");
+  const uOcclusionSoftness = gpu.getUniformLocation(
+    program,
+    "u_occlusionSoftness",
+  );
+  const uSegThreshold = gpu.getUniformLocation(program, "u_segThreshold");
+  const uHeadAttach = gpu.getUniformLocation(program, "u_headAttach");
+  const uHasMask = gpu.getUniformLocation(program, "u_hasMask");
+  const uCalibrated = gpu.getUniformLocation(program, "u_calibrated");
+  const uOcclusionViz = gpu.getUniformLocation(program, "u_occlusionViz");
+  const uDepthPackRange = gpu.getUniformLocation(program, "u_depthPackRange");
+  const uPersonMask = gpu.getUniformLocation(program, "u_personMask");
+  const uBodyDepth = gpu.getUniformLocation(program, "u_bodyDepth");
   const uCoreColor = gpu.getUniformLocation(program, "u_coreColor");
   const uCyan = gpu.getUniformLocation(program, "u_cyan");
   const uBlue = gpu.getUniformLocation(program, "u_blue");
@@ -401,11 +473,13 @@ export function createRibbonRenderer(
 
   let videoWidth = 1;
   let videoHeight = 1;
-  let head: { x: number; y: number } | null = null;
+  let head: { x: number; y: number; z: number } | null = null;
   let ribbonTarget: FrameTarget | null = null;
   let lastSampleCount = 0;
   let lastVertexCount = 0;
   let activeVfx: RibbonVfxConfig = DEFAULT_RIBBON_VFX_CONFIG;
+  let hasMask = false;
+  let calibrated = false;
 
   gpu.disable(gpu.DEPTH_TEST);
   gpu.enable(gpu.BLEND);
@@ -432,6 +506,24 @@ export function createRibbonRenderer(
     gpu.uniform1f(uDepthEnabled, activeVfx.depthEnabled ? 1 : 0);
     gpu.uniform1f(uDepthViz, activeVfx.depthViz ? 1 : 0);
     gpu.uniform1f(uDepthBloomStrength, activeVfx.depthBloomStrength);
+    gpu.uniform1f(uOcclusionEnabled, activeVfx.occlusionEnabled ? 1 : 0);
+    gpu.uniform1f(uOcclusionBias, activeVfx.occlusionDepthBias);
+    gpu.uniform1f(uOcclusionSoftness, activeVfx.occlusionSoftness);
+    gpu.uniform1f(uSegThreshold, activeVfx.segmentationThreshold);
+    gpu.uniform1f(
+      uHeadAttach,
+      Math.max(0.02, HEAD_ATTACH_MS / Math.max(1, activeVfx.trailDurationMs)),
+    );
+    gpu.uniform1f(uHasMask, hasMask ? 1 : 0);
+    gpu.uniform1f(uCalibrated, calibrated ? 1 : 0);
+    gpu.uniform1f(uOcclusionViz, activeVfx.occlusionViz ? 1 : 0);
+    gpu.uniform1f(uDepthPackRange, TRACKED_DEPTH_PACK_RANGE);
+    gpu.uniform1i(uPersonMask, 0);
+    gpu.uniform1i(uBodyDepth, 1);
+    gpu.activeTexture(gpu.TEXTURE0);
+    gpu.bindTexture(gpu.TEXTURE_2D, personMaskTexture);
+    gpu.activeTexture(gpu.TEXTURE1);
+    gpu.bindTexture(gpu.TEXTURE_2D, bodyDepthTexture);
     gpu.uniform3f(uCoreColor, core[0], core[1], core[2]);
     gpu.uniform3f(uCyan, body[0], body[1], body[2]);
     gpu.uniform3f(uBlue, mid[0], mid[1], mid[2]);
@@ -439,6 +531,10 @@ export function createRibbonRenderer(
     gpu.bindVertexArray(vao);
     gpu.drawArrays(gpu.TRIANGLE_STRIP, 0, vertexCount);
     gpu.bindVertexArray(null);
+    gpu.activeTexture(gpu.TEXTURE1);
+    gpu.bindTexture(gpu.TEXTURE_2D, null);
+    gpu.activeTexture(gpu.TEXTURE0);
+    gpu.bindTexture(gpu.TEXTURE_2D, null);
   }
 
   function bindDefaultFramebuffer(): void {
@@ -446,15 +542,12 @@ export function createRibbonRenderer(
     gpu.viewport(0, 0, canvas.width, canvas.height);
   }
 
-  function drawTrail(
+  function drawStroke(
     segments: TimedSegment[],
     nowMs: number,
-    isRight: boolean,
+    reportHead: boolean,
   ): void {
     if (segments.length === 0) {
-      if (isRight) {
-        head = null;
-      }
       return;
     }
 
@@ -465,17 +558,15 @@ export function createRibbonRenderer(
     );
     lastSampleCount += samples.length;
     if (samples.length < 2) {
-      if (isRight) {
-        head = samples[0]
-          ? { x: samples[0].x, y: samples[0].y }
-          : null;
+      if (reportHead && samples[0]) {
+        head = { x: samples[0].x, y: samples[0].y, z: samples[0].z };
       }
       return;
     }
 
-    if (isRight) {
+    if (reportHead) {
       const tip = samples[samples.length - 1];
-      head = { x: tip.x, y: tip.y };
+      head = { x: tip.x, y: tip.y, z: tip.z };
     }
 
     const vertexCount = writeStripVertices(samples, vertices, activeVfx);
@@ -488,6 +579,20 @@ export function createRibbonRenderer(
     );
     gpu.bindBuffer(gpu.ARRAY_BUFFER, null);
     drawRibbonMesh(vertexCount);
+  }
+
+  /** Each stroke is tessellated, resampled and drawn independently. */
+  function drawTrail(
+    strokes: RibbonStroke[],
+    nowMs: number,
+    isRight: boolean,
+  ): void {
+    if (isRight) {
+      head = null;
+    }
+    for (let i = 0; i < strokes.length; i++) {
+      drawStroke(strokes[i], nowMs, isRight && i === strokes.length - 1);
+    }
   }
 
   return {
@@ -510,6 +615,66 @@ export function createRibbonRenderer(
         canvas.height,
       );
       bloom.resize(canvas.width, canvas.height);
+    },
+
+    setOcclusionSources(
+      mask: PersonMask | null,
+      body: BodyDepthField | null,
+      sceneCalibrated: boolean,
+    ): void {
+      calibrated = sceneCalibrated;
+      hasMask = Boolean(mask && body);
+      gpu.pixelStorei(gpu.UNPACK_FLIP_Y_WEBGL, 0);
+      gpu.bindTexture(gpu.TEXTURE_2D, personMaskTexture);
+      if (mask) {
+        gpu.texImage2D(
+          gpu.TEXTURE_2D,
+          0,
+          gpu.RGBA,
+          gpu.RGBA,
+          gpu.UNSIGNED_BYTE,
+          mask.canvas,
+        );
+      } else {
+        gpu.texImage2D(
+          gpu.TEXTURE_2D,
+          0,
+          gpu.RGBA,
+          1,
+          1,
+          0,
+          gpu.RGBA,
+          gpu.UNSIGNED_BYTE,
+          new Uint8Array([0, 0, 0, 0]),
+        );
+      }
+      gpu.bindTexture(gpu.TEXTURE_2D, bodyDepthTexture);
+      if (body) {
+        gpu.texImage2D(
+          gpu.TEXTURE_2D,
+          0,
+          gpu.RGBA,
+          body.width,
+          body.height,
+          0,
+          gpu.RGBA,
+          gpu.UNSIGNED_BYTE,
+          body.packed,
+        );
+      } else {
+        gpu.texImage2D(
+          gpu.TEXTURE_2D,
+          0,
+          gpu.RGBA,
+          1,
+          1,
+          0,
+          gpu.RGBA,
+          gpu.UNSIGNED_BYTE,
+          new Uint8Array([128, 0, 0, 0]),
+        );
+      }
+      gpu.bindTexture(gpu.TEXTURE_2D, null);
     },
 
     render(trails: RibbonTrails, nowMs: number, vfx: RibbonVfxConfig): void {
@@ -535,7 +700,7 @@ export function createRibbonRenderer(
       bloom.composite(ribbonTarget.texture, bloomTexture, vfx);
     },
 
-    lastHead(): { x: number; y: number } | null {
+    lastHead(): { x: number; y: number; z: number } | null {
       return head;
     },
 
@@ -553,6 +718,8 @@ export function createRibbonRenderer(
       disposeFrameTarget(gpu, ribbonTarget);
       ribbonTarget = null;
       bloom.dispose();
+      gpu.deleteTexture(personMaskTexture);
+      gpu.deleteTexture(bodyDepthTexture);
       gpu.deleteBuffer(buffer);
       gpu.deleteVertexArray(vao);
       gpu.deleteProgram(program);

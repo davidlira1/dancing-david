@@ -5,12 +5,22 @@ import { startCamera } from "./camera.ts";
 import { createEnergySwipeEffect } from "./energy-swipe.ts";
 import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
-import { updatePersonMask } from "./segmentation.ts";
+import { lastPersonMask, updatePersonMask } from "./segmentation.ts";
+import { createSceneDepth } from "./scene-depth.ts";
+import {
+  createBodyDepthField,
+  formatOcclusionDebug,
+  HEAD_ATTACH_MS,
+  occlusionFactor,
+} from "./body-depth.ts";
+import { drawOcclusionDebug } from "./occlusion-debug.ts";
 import { buildTrailGeometry } from "./trail.ts";
 import {
+  drawStrokeDebug,
   drawTrackingDebug,
   formatTrackingDebug,
 } from "./tracking-debug.ts";
+import { formatContinuityDebug } from "./stroke-continuity.ts";
 import { formatDepthDebug } from "./depth.ts";
 import { ribbonPerspectiveFromTracked } from "./webgl/projection.ts";
 import { createVfxControls } from "./vfx-controls.ts";
@@ -19,7 +29,6 @@ import { createRibbonVfxConfig } from "./webgl/visual.ts";
 import {
   createWristTrail,
   LEFT_WRIST_INDEX,
-  MIN_VISIBILITY,
   RIGHT_WRIST_INDEX,
 } from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
@@ -34,29 +43,44 @@ const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const debugEl = document.querySelector<HTMLPreElement>("#motion-debug")!;
 const wristTrail = createWristTrail();
-const visualRight = createVisualTrajectory();
-const visualLeft = createVisualTrajectory();
+const vfxConfig = createRibbonVfxConfig();
+const sceneDepth = createSceneDepth({ invertZ: vfxConfig.invertZ });
+const visualRight = createVisualTrajectory(sceneDepth);
+const visualLeft = createVisualTrajectory(sceneDepth);
+const bodyDepth = createBodyDepthField();
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
-const vfxConfig = createRibbonVfxConfig();
+function applyContinuityThresholds(): void {
+  const thresholds = {
+    minVisibility: vfxConfig.minContinuityVisibility,
+    maxGapMs: vfxConfig.continuityGapMs,
+    maxReacquireDistancePx: vfxConfig.continuityReacquirePx,
+  };
+  visualRight.setContinuityThresholds(thresholds);
+  visualLeft.setContinuityThresholds(thresholds);
+}
+
 const vfxControls = createVfxControls({
   config: vfxConfig,
   onChange: () => {
     visualRight.setDurationMs(vfxConfig.trailDurationMs);
     visualLeft.setDurationMs(vfxConfig.trailDurationMs);
-    visualRight.setInvertZ(vfxConfig.invertZ);
-    visualLeft.setInvertZ(vfxConfig.invertZ);
+    applyContinuityThresholds();
+    if (sceneDepth.setInvertZ(vfxConfig.invertZ)) {
+      visualRight.handleSceneInvert();
+      visualLeft.handleSceneInvert();
+    }
   },
   onRecalibrate: () => {
-    visualRight.recalibrateDepth();
-    visualLeft.recalibrateDepth();
+    sceneDepth.recalibrate();
+    visualRight.handleSceneRecalibrate();
+    visualLeft.handleSceneRecalibrate();
   },
 });
 visualRight.setDurationMs(vfxConfig.trailDurationMs);
 visualLeft.setDurationMs(vfxConfig.trailDurationMs);
-visualRight.setInvertZ(vfxConfig.invertZ);
-visualLeft.setInvertZ(vfxConfig.invertZ);
+applyContinuityThresholds();
 let lastSwipeLabel = "—";
 let lastMotion: MotionSnapshot | null = null;
 
@@ -184,15 +208,30 @@ async function main(): Promise<void> {
             while (visionTimes.length > 0 && visionTimes[0] < now - 1000) {
               visionTimes.shift();
             }
+            const mask = updatePersonMask(result);
             if (visibility.aura) {
-              const mask = updatePersonMask(result);
-              drawAura(auraCanvas, video, mask);
+              drawAura(auraCanvas, video, mask?.canvas ?? null);
             }
+            const field = bodyDepth.update(
+              result.landmarks[0],
+              mask,
+              sceneDepth,
+              vfxConfig.bodyInfluenceRadius,
+            );
+            ribbonRenderer?.setOcclusionSources(
+              mask,
+              field,
+              sceneDepth.isReady(),
+            );
             wristTrail.update(result.landmarks[0], now);
             const landmarks = result.landmarks[0];
             const rightWrist = landmarks?.[RIGHT_WRIST_INDEX];
             const leftWrist = landmarks?.[LEFT_WRIST_INDEX];
-            if (rightWrist && rightWrist.visibility >= MIN_VISIBILITY) {
+            // Continuity thresholds are in pixels, so it needs the real frame size.
+            visualRight.setViewport(video.videoWidth, video.videoHeight);
+            visualLeft.setViewport(video.videoWidth, video.videoHeight);
+            const minVisibility = vfxConfig.minContinuityVisibility;
+            if (rightWrist && rightWrist.visibility >= minVisibility) {
               lastRawWrist = { x: rightWrist.x, y: rightWrist.y };
               lastVisibility = rightWrist.visibility;
               visualRight.update({
@@ -205,9 +244,9 @@ async function main(): Promise<void> {
             } else {
               lastRawWrist = null;
               lastVisibility = rightWrist?.visibility ?? 0;
-              visualRight.prune(now);
+              visualRight.noteMissedFrame(now, lastVisibility);
             }
-            if (leftWrist && leftWrist.visibility >= MIN_VISIBILITY) {
+            if (leftWrist && leftWrist.visibility >= minVisibility) {
               visualLeft.update({
                 x: leftWrist.x,
                 y: leftWrist.y,
@@ -216,7 +255,7 @@ async function main(): Promise<void> {
                 visibility: leftWrist.visibility,
               });
             } else {
-              visualLeft.prune(now);
+              visualLeft.noteMissedFrame(now, leftWrist?.visibility ?? 0);
             }
             const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
             lastMotion = motion;
@@ -232,7 +271,44 @@ async function main(): Promise<void> {
         visualRight.setDurationMs(vfxConfig.trailDurationMs);
         visualLeft.setDurationMs(vfxConfig.trailDurationMs);
         const depthSnap = visualRight.depthSnapshot();
-        vfxControls.updateDepthMeter(depthSnap);
+        const head = ribbonRenderer?.lastHead() ?? null;
+        const bodyAtHead =
+          head && video.videoWidth > 0
+            ? bodyDepth.sample(
+                head.x / video.videoWidth,
+                head.y / video.videoHeight,
+              )
+            : null;
+        const headAttach =
+          HEAD_ATTACH_MS / Math.max(1, vfxConfig.trailDurationMs);
+        const occFactor = occlusionFactor({
+          coverage: bodyAtHead?.coverage ?? 0,
+          ribbonTracked: head?.z ?? depthSnap.trackedDepth,
+          bodyTracked: bodyAtHead?.trackedDepth ?? 0,
+          bodyValid: bodyAtHead?.valid ?? false,
+          occlusionEnabled: vfxConfig.occlusionEnabled,
+          calibrated: sceneDepth.isReady(),
+          hasMask: Boolean(bodyAtHead),
+          bias: vfxConfig.occlusionDepthBias,
+          softness: vfxConfig.occlusionSoftness,
+          segThreshold: vfxConfig.segmentationThreshold,
+          headLife: 0,
+          headAttach: Math.max(0.02, headAttach),
+        });
+        vfxControls.updateDepthMeter(
+          depthSnap,
+          bodyAtHead
+            ? formatOcclusionDebug({
+                coverage: bodyAtHead.coverage,
+                ribbonTracked: head?.z ?? depthSnap.trackedDepth,
+                bodyTracked: bodyAtHead.trackedDepth,
+                delta:
+                  (head?.z ?? depthSnap.trackedDepth) - bodyAtHead.trackedDepth,
+                occlusionFactor: occFactor,
+                valid: bodyAtHead.valid,
+              })
+            : "Occ coverage: —",
+        );
         if (ribbonRenderer && video.videoWidth > 0 && video.videoHeight > 0) {
           ribbonRenderer.resize(
             video.videoWidth,
@@ -261,8 +337,29 @@ async function main(): Promise<void> {
           );
         }
 
+        let overlayDrawn = false;
         if (visibility.skeleton && lastPoseResult) {
           drawPose(overlayCanvas, video, lastPoseResult);
+          overlayDrawn = true;
+        }
+        if (vfxConfig.segmentationDebug || vfxConfig.bodyDepthDebug) {
+          drawOcclusionDebug(overlayCanvas, video, {
+            mask: lastPersonMask(),
+            field: bodyDepth.last(),
+            segmentationDebug: vfxConfig.segmentationDebug,
+            bodyDepthDebug: vfxConfig.bodyDepthDebug,
+            clear: !overlayDrawn,
+          });
+          overlayDrawn = true;
+        }
+        if (vfxConfig.strokeDebug) {
+          drawStrokeDebug(
+            overlayCanvas,
+            video,
+            [...visualRight.strokeStarts(), ...visualLeft.strokeStarts()],
+            !overlayDrawn,
+          );
+          overlayDrawn = true;
         }
 
         if (visibility.tracking) {
@@ -292,7 +389,7 @@ async function main(): Promise<void> {
             overlayCanvas,
             video,
             snapshot,
-            !visibility.skeleton,
+            !overlayDrawn,
           );
           debugEl.textContent =
             formatTrackingDebug(snapshot) +
@@ -303,7 +400,25 @@ async function main(): Promise<void> {
                 depthSnap.trackedDepth,
                 vfxConfig,
               ),
-            });
+            }) +
+            (bodyAtHead
+              ? "\n" +
+                formatOcclusionDebug({
+                  coverage: bodyAtHead.coverage,
+                  ribbonTracked: head?.z ?? depthSnap.trackedDepth,
+                  bodyTracked: bodyAtHead.trackedDepth,
+                  delta:
+                    (head?.z ?? depthSnap.trackedDepth) -
+                    bodyAtHead.trackedDepth,
+                  occlusionFactor: occFactor,
+                  valid: bodyAtHead.valid,
+                })
+              : "") +
+            "\n" +
+            formatContinuityDebug(
+              visualRight.continuityDebug(),
+              visualRight.strokeCount(),
+            );
         }
 
         if (visibility.energySwipe) {

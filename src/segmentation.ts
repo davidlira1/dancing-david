@@ -3,36 +3,63 @@ import type { MPMask, PoseLandmarkerResult } from "@mediapipe/tasks-vision";
 const maskCanvas = document.createElement("canvas");
 const maskCtx = maskCanvas.getContext("2d")!;
 
-function readConfidence(mask: MPMask): Float32Array {
+export type PersonMask = {
+  width: number;
+  height: number;
+  confidence: Float32Array;
+  canvas: HTMLCanvasElement;
+};
+
+let cached: PersonMask | null = null;
+
+function readConfidence(
+  mask: MPMask,
+  into: Float32Array | null,
+): Float32Array {
   if (mask.hasUint8Array()) {
     const bytes = mask.getAsUint8Array();
-    const values = new Float32Array(bytes.length);
+    const values =
+      into && into.length === bytes.length ? into : new Float32Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) {
       values[i] = bytes[i] / 255;
     }
     return values;
   }
 
-  return mask.getAsFloat32Array();
+  const floats = mask.getAsFloat32Array();
+  if (into && into.length === floats.length) {
+    into.set(floats);
+    return into;
+  }
+  return floats;
 }
 
 export function updatePersonMask(
   result: PoseLandmarkerResult,
-): HTMLCanvasElement | null {
+): PersonMask | null {
   const mask = result.segmentationMasks?.[0];
   if (!mask) {
+    cached = null;
     return null;
   }
 
-  if (maskCanvas.width !== mask.width || maskCanvas.height !== mask.height) {
-    maskCanvas.width = mask.width;
-    maskCanvas.height = mask.height;
+  const width = mask.width;
+  const height = mask.height;
+  const prev = cached;
+  const confidence = readConfidence(
+    mask,
+    prev && prev.width === width && prev.height === height
+      ? prev.confidence
+      : null,
+  );
+
+  if (maskCanvas.width !== width || maskCanvas.height !== height) {
+    maskCanvas.width = width;
+    maskCanvas.height = height;
   }
 
-  const confidence = readConfidence(mask);
-  const imageData = maskCtx.createImageData(mask.width, mask.height);
+  const imageData = maskCtx.createImageData(width, height);
   const pixels = imageData.data;
-
   for (let i = 0; i < confidence.length; i++) {
     const offset = i * 4;
     const alpha = Math.round(confidence[i] * 255);
@@ -41,7 +68,17 @@ export function updatePersonMask(
     pixels[offset + 2] = 255;
     pixels[offset + 3] = alpha;
   }
-
   maskCtx.putImageData(imageData, 0, 0);
-  return maskCanvas;
+
+  cached = {
+    width,
+    height,
+    confidence,
+    canvas: maskCanvas,
+  };
+  return cached;
+}
+
+export function lastPersonMask(): PersonMask | null {
+  return cached;
 }

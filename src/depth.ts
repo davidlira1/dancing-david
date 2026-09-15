@@ -1,8 +1,12 @@
+import {
+  createSceneDepth,
+  type SceneDepth,
+  type SceneDepthSnapshot,
+  type TrackedDepth,
+} from "./scene-depth.ts";
+
 const DEPTH_CONFIDENT_VISIBILITY = 0.65;
 
-export const DEPTH_CALIBRATION_MS = 1000;
-export const DEPTH_MIN_CALIBRATION_SAMPLES = 10;
-export const DEPTH_CALIBRATION_GAP_MS = 400;
 export const DEPTH_JUMP = 0.08;
 export const DEPTH_JUMP_SPEED_MULT = 8;
 export const DEPTH_UNTRUSTED_STEP_SCALE = 0.65;
@@ -11,7 +15,7 @@ export type DepthSnapshot = {
   rawZ: number;
   baselineZ: number;
   relativeZ: number;
-  trackedDepth: number;
+  trackedDepth: TrackedDepth;
   vz: number;
   visibility: number;
   calibrated: boolean;
@@ -67,80 +71,36 @@ function createOneEuroFilter(minCutoff: number, beta: number, dCutoff: number) {
   };
 }
 
-export function createDepthTracker(options?: { invertZ?: boolean }) {
+export function createDepthTracker(scene: SceneDepth) {
   const euro = createOneEuroFilter(1.0, 0.007, 1.0);
-  const calSamples: number[] = [];
-  let calStartMs = 0;
-  let lastCalMs = 0;
-  let calibrating = true;
-  let calibrated = false;
-  let baselineZ = 0;
   let rawZ = 0;
   let relativeZ = 0;
-  let trackedDepth = 0;
+  let trackedDepth: TrackedDepth = 0;
   let vz = 0;
   let visibility = 0;
   let lastRelative: number | null = null;
   let lastT = 0;
-  let invertZ = options?.invertZ ?? true;
 
-  function relativeFromRaw(value: number): number {
-    return invertZ ? baselineZ - value : value - baselineZ;
-  }
-
-  function finishCalibration(): void {
-    if (calSamples.length === 0) {
-      return;
-    }
-    let sum = 0;
-    for (let i = 0; i < calSamples.length; i++) {
-      sum += calSamples[i];
-    }
-    baselineZ = sum / calSamples.length;
-    calibrated = true;
-    calibrating = false;
-    euro.reset();
-    lastRelative = 0;
-    trackedDepth = 0;
-    relativeZ = 0;
-    vz = 0;
+  function sceneFrame(): SceneDepthSnapshot {
+    return scene.snapshot();
   }
 
   function snapshot(): DepthSnapshot {
+    const frame = sceneFrame();
     return {
       rawZ,
-      baselineZ,
+      baselineZ: frame.baselineZ,
       relativeZ,
       trackedDepth,
       vz,
       visibility,
-      calibrated,
-      calibrating,
+      calibrated: frame.calibrated,
+      calibrating: frame.calibrating,
     };
   }
 
   return {
-    setInvertZ(value: boolean): boolean {
-      if (invertZ === value) {
-        return false;
-      }
-      invertZ = value;
-      relativeZ = -relativeZ;
-      trackedDepth = -trackedDepth;
-      vz = -vz;
-      if (lastRelative !== null) {
-        lastRelative = -lastRelative;
-      }
-      euro.reset();
-      return true;
-    },
-
-    recalibrate(): void {
-      calSamples.length = 0;
-      calStartMs = 0;
-      lastCalMs = 0;
-      calibrating = true;
-      calibrated = false;
+    resetFilter(): void {
       euro.reset();
       lastRelative = null;
       trackedDepth = 0;
@@ -148,41 +108,35 @@ export function createDepthTracker(options?: { invertZ?: boolean }) {
       vz = 0;
     },
 
+    negateTracked(): void {
+      trackedDepth = -trackedDepth;
+      relativeZ = -relativeZ;
+      vz = -vz;
+      if (lastRelative !== null) {
+        lastRelative = -lastRelative;
+      }
+      euro.reset();
+    },
+
     update(nextRawZ: number, timestampMs: number, nextVisibility: number): DepthSnapshot {
       rawZ = nextRawZ;
       visibility = nextVisibility;
+      scene.offerCalibrationSample(nextRawZ, timestampMs, nextVisibility);
+
+      if (!scene.isReady()) {
+        lastT = timestampMs;
+        trackedDepth = 0;
+        relativeZ = 0;
+        vz = 0;
+        lastRelative = null;
+        euro.reset();
+        return snapshot();
+      }
+
       const trust = clamp01(
         (nextVisibility - 0.5) / Math.max(DEPTH_CONFIDENT_VISIBILITY - 0.5, 1e-4),
       );
-
-      if (calibrating) {
-        if (nextVisibility >= DEPTH_CONFIDENT_VISIBILITY) {
-          if (
-            lastCalMs > 0 &&
-            timestampMs - lastCalMs > DEPTH_CALIBRATION_GAP_MS
-          ) {
-            calSamples.length = 0;
-            calStartMs = timestampMs;
-          }
-          if (calStartMs === 0) {
-            calStartMs = timestampMs;
-          }
-          calSamples.push(nextRawZ);
-          lastCalMs = timestampMs;
-        }
-        const elapsed = calStartMs === 0 ? 0 : lastCalMs - calStartMs;
-        if (
-          calSamples.length >= DEPTH_MIN_CALIBRATION_SAMPLES &&
-          elapsed >= DEPTH_CALIBRATION_MS
-        ) {
-          finishCalibration();
-        } else {
-          lastT = timestampMs;
-          return snapshot();
-        }
-      }
-
-      const target = relativeFromRaw(nextRawZ);
+      const target = scene.toTracked(nextRawZ);
       const dt = Math.max(0, timestampMs - lastT);
       let allowed = DEPTH_JUMP * lerp(DEPTH_UNTRUSTED_STEP_SCALE, 1, trust);
       if (lastRelative !== null && dt > 0) {
@@ -215,7 +169,7 @@ export function createDepthTracker(options?: { invertZ?: boolean }) {
 }
 
 export function visualDepthFromTracked(
-  trackedDepth: number,
+  trackedDepth: TrackedDepth,
   depthStrength: number,
 ): number {
   return trackedDepth * depthStrength;
@@ -250,3 +204,6 @@ export function formatDepthDebug(snapshot: {
     `Visibility: ${snapshot.visibility.toFixed(2)}`
   );
 }
+
+export { createSceneDepth };
+export type { SceneDepth, SceneDepthSnapshot, TrackedDepth };
