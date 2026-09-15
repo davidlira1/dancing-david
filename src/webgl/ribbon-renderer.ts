@@ -6,6 +6,7 @@ import {
   ensureFrameTarget,
   type FrameTarget,
 } from "./framebuffer.ts";
+import { ribbonPerspectiveFromTracked } from "./projection.ts";
 import {
   compileProgram,
   RIBBON_FRAGMENT_SHADER,
@@ -23,12 +24,13 @@ import {
 } from "./visual.ts";
 
 const TANGENT_EPS = 1e-6;
-const FLOATS_PER_VERTEX = 6;
+const FLOATS_PER_VERTEX = 8;
 const MAX_VERTICES = MAX_RIBBON_SAMPLES * 2;
 
 export type CenterSample = {
   x: number;
   y: number;
+  z: number;
   nx: number;
   ny: number;
   life: number;
@@ -57,6 +59,7 @@ export type RibbonRenderer = {
 type PolyPoint = {
   x: number;
   y: number;
+  z: number;
   t: number;
 };
 
@@ -83,6 +86,7 @@ function flattenTrail(segments: TimedSegment[]): PolyPoint[] {
       points.push({
         x: sample.x,
         y: sample.y,
+        z: sample.z,
         t: lerp(segment.t0, segment.t1, sample.u),
       });
     }
@@ -114,6 +118,7 @@ function interpolateAt(
   return {
     x: a.x + (b.x - a.x) * u,
     y: a.y + (b.y - a.y) * u,
+    z: a.z + (b.z - a.z) * u,
     t: a.t + (b.t - a.t) * u,
   };
 }
@@ -231,6 +236,7 @@ export function sampleRibbonCenterline(
     samples[i] = {
       x: point.x,
       y: point.y,
+      z: point.z,
       nx: 0,
       ny: 1,
       life: 1 - clamp01((nowMs - point.t) / duration),
@@ -278,23 +284,32 @@ function averageInteriorNormals(samples: CenterSample[]): void {
 export function writeStripVertices(
   samples: CenterSample[],
   out: Float32Array,
+  vfx: RibbonVfxConfig = DEFAULT_RIBBON_VFX_CONFIG,
 ): number {
   const count = Math.min(samples.length, MAX_RIBBON_SAMPLES);
   let offset = 0;
   for (let i = 0; i < count; i++) {
     const sample = samples[i];
+    const { perspectiveScale } = ribbonPerspectiveFromTracked(
+      sample.z,
+      vfx,
+    );
     out[offset++] = sample.x;
     out[offset++] = sample.y;
     out[offset++] = sample.nx;
     out[offset++] = sample.ny;
     out[offset++] = -1;
     out[offset++] = sample.life;
+    out[offset++] = sample.z;
+    out[offset++] = perspectiveScale;
     out[offset++] = sample.x;
     out[offset++] = sample.y;
     out[offset++] = sample.nx;
     out[offset++] = sample.ny;
     out[offset++] = 1;
     out[offset++] = sample.life;
+    out[offset++] = sample.z;
+    out[offset++] = perspectiveScale;
   }
   return count * 2;
 }
@@ -347,6 +362,8 @@ export function createRibbonRenderer(
   const aNormal = gpu.getAttribLocation(program, "a_normal");
   const aSide = gpu.getAttribLocation(program, "a_side");
   const aLife = gpu.getAttribLocation(program, "a_life");
+  const aDepth = gpu.getAttribLocation(program, "a_depth");
+  const aPerspective = gpu.getAttribLocation(program, "a_perspective");
 
   gpu.enableVertexAttribArray(aCenter);
   gpu.vertexAttribPointer(aCenter, 2, gpu.FLOAT, false, stride, 0);
@@ -356,6 +373,10 @@ export function createRibbonRenderer(
   gpu.vertexAttribPointer(aSide, 1, gpu.FLOAT, false, stride, 16);
   gpu.enableVertexAttribArray(aLife);
   gpu.vertexAttribPointer(aLife, 1, gpu.FLOAT, false, stride, 20);
+  gpu.enableVertexAttribArray(aDepth);
+  gpu.vertexAttribPointer(aDepth, 1, gpu.FLOAT, false, stride, 24);
+  gpu.enableVertexAttribArray(aPerspective);
+  gpu.vertexAttribPointer(aPerspective, 1, gpu.FLOAT, false, stride, 28);
 
   gpu.bindVertexArray(null);
   gpu.bindBuffer(gpu.ARRAY_BUFFER, null);
@@ -367,6 +388,12 @@ export function createRibbonRenderer(
   const uEdgeSoftness = gpu.getUniformLocation(program, "u_edgeSoftness");
   const uTailFadeEnd = gpu.getUniformLocation(program, "u_tailFadeEnd");
   const uIntensity = gpu.getUniformLocation(program, "u_intensity");
+  const uDepthEnabled = gpu.getUniformLocation(program, "u_depthEnabled");
+  const uDepthViz = gpu.getUniformLocation(program, "u_depthViz");
+  const uDepthBloomStrength = gpu.getUniformLocation(
+    program,
+    "u_depthBloomStrength",
+  );
   const uCoreColor = gpu.getUniformLocation(program, "u_coreColor");
   const uCyan = gpu.getUniformLocation(program, "u_cyan");
   const uBlue = gpu.getUniformLocation(program, "u_blue");
@@ -402,6 +429,9 @@ export function createRibbonRenderer(
     gpu.uniform1f(uEdgeSoftness, activeVfx.edgeSoftness);
     gpu.uniform1f(uTailFadeEnd, TAIL_FADE_END);
     gpu.uniform1f(uIntensity, activeVfx.ribbonIntensity);
+    gpu.uniform1f(uDepthEnabled, activeVfx.depthEnabled ? 1 : 0);
+    gpu.uniform1f(uDepthViz, activeVfx.depthViz ? 1 : 0);
+    gpu.uniform1f(uDepthBloomStrength, activeVfx.depthBloomStrength);
     gpu.uniform3f(uCoreColor, core[0], core[1], core[2]);
     gpu.uniform3f(uCyan, body[0], body[1], body[2]);
     gpu.uniform3f(uBlue, mid[0], mid[1], mid[2]);
@@ -448,7 +478,7 @@ export function createRibbonRenderer(
       head = { x: tip.x, y: tip.y };
     }
 
-    const vertexCount = writeStripVertices(samples, vertices);
+    const vertexCount = writeStripVertices(samples, vertices, activeVfx);
     lastVertexCount += vertexCount;
     gpu.bindBuffer(gpu.ARRAY_BUFFER, buffer);
     gpu.bufferSubData(

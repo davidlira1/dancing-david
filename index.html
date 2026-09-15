@@ -99,6 +99,67 @@ Last event: —</pre>
                   <span id="vfx-trailDurationMs-value">1900 ms</span>
                 </span>
               </label>
+              <p class="vfx-section">Depth</p>
+              <label class="vfx-check">
+                <input id="vfx-depthEnabled" type="checkbox" />
+                <span>Depth Enabled</span>
+              </label>
+              <label>
+                <span>Depth Strength</span>
+                <span class="vfx-row">
+                  <input id="vfx-depthStrength" type="range" min="0" max="3" step="0.05" />
+                  <span id="vfx-depthStrength-value">1.00</span>
+                </span>
+              </label>
+              <label>
+                <span>Perspective Strength</span>
+                <span class="vfx-row">
+                  <input id="vfx-perspectiveStrength" type="range" min="0" max="3" step="0.05" />
+                  <span id="vfx-perspectiveStrength-value">1.15</span>
+                </span>
+              </label>
+              <label>
+                <span>Min Perspective Scale</span>
+                <span class="vfx-row">
+                  <input id="vfx-minPerspectiveScale" type="range" min="0.2" max="1" step="0.01" />
+                  <span id="vfx-minPerspectiveScale-value">0.55</span>
+                </span>
+              </label>
+              <label>
+                <span>Max Perspective Scale</span>
+                <span class="vfx-row">
+                  <input id="vfx-maxPerspectiveScale" type="range" min="1" max="3" step="0.01" />
+                  <span id="vfx-maxPerspectiveScale-value">1.85</span>
+                </span>
+              </label>
+              <label>
+                <span>Depth Bloom Strength</span>
+                <span class="vfx-row">
+                  <input id="vfx-depthBloomStrength" type="range" min="0" max="1" step="0.01" />
+                  <span id="vfx-depthBloomStrength-value">0.22</span>
+                </span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-depthViz" type="checkbox" />
+                <span>Depth Viz</span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-invertZ" type="checkbox" />
+                <span>Invert Z</span>
+              </label>
+              <div class="vfx-actions">
+                <button type="button" id="vfx-recalibrate">Recalibrate</button>
+              </div>
+              <div id="vfx-depth-meter" class="depth-meter">
+                <pre id="vfx-depth-debug">Depth: uncalibrated</pre>
+                <div class="depth-bar" aria-hidden="true">
+                  <span>FAR</span>
+                  <div class="depth-track">
+                    <div id="vfx-depth-marker" class="depth-marker"></div>
+                  </div>
+                  <span>CLOSER</span>
+                </div>
+              </div>
               <p class="vfx-section">Color</p>
               <label>
                 <span>Core Color</span>

@@ -7,6 +7,12 @@ export const MIN_WIDTH_SCALE = 0.04;
 export const TAIL_FADE_END = 0.12;
 export const INTENSITY = 1.45;
 
+export const DEPTH_STRENGTH = 1;
+export const PERSPECTIVE_STRENGTH = 1.15;
+export const MIN_PERSPECTIVE_SCALE = 0.55;
+export const MAX_PERSPECTIVE_SCALE = 1.85;
+export const DEPTH_BLOOM_STRENGTH = 0.22;
+
 export const BLOOM_SCALE = 0.5;
 export const BLOOM_RADIUS = 2.4;
 export const BLOOM_INTENSITY = 1.05;
@@ -74,6 +80,14 @@ export type RibbonVfxConfig = {
   bodyColor: string;
   edgeColor: string;
   bloomColor: string;
+  depthEnabled: boolean;
+  depthStrength: number;
+  perspectiveStrength: number;
+  minPerspectiveScale: number;
+  maxPerspectiveScale: number;
+  depthBloomStrength: number;
+  depthViz: boolean;
+  invertZ: boolean;
 };
 
 function clamp01(value: number): number {
@@ -127,6 +141,14 @@ export const DEFAULT_RIBBON_VFX_CONFIG: RibbonVfxConfig = {
   bodyColor: rgbToHex(DEFAULT_SCHEME.inner),
   edgeColor: rgbToHex(DEFAULT_SCHEME.outer),
   bloomColor: rgbToHex(DEFAULT_SCHEME.bloomTint),
+  depthEnabled: true,
+  depthStrength: DEPTH_STRENGTH,
+  perspectiveStrength: PERSPECTIVE_STRENGTH,
+  minPerspectiveScale: MIN_PERSPECTIVE_SCALE,
+  maxPerspectiveScale: MAX_PERSPECTIVE_SCALE,
+  depthBloomStrength: DEPTH_BLOOM_STRENGTH,
+  depthViz: false,
+  invertZ: true,
 };
 
 export function createRibbonVfxConfig(): RibbonVfxConfig {
@@ -159,6 +181,14 @@ export function assignRibbonVfxConfig(
   target.bodyColor = source.bodyColor;
   target.edgeColor = source.edgeColor;
   target.bloomColor = source.bloomColor;
+  target.depthEnabled = source.depthEnabled;
+  target.depthStrength = source.depthStrength;
+  target.perspectiveStrength = source.perspectiveStrength;
+  target.minPerspectiveScale = source.minPerspectiveScale;
+  target.maxPerspectiveScale = source.maxPerspectiveScale;
+  target.depthBloomStrength = source.depthBloomStrength;
+  target.depthViz = source.depthViz;
+  target.invertZ = source.invertZ;
 }
 
 export const THIN_RIBBON_VFX_PRESET: RibbonVfxConfig = {

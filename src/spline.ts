@@ -1,6 +1,7 @@
 export type Vec2 = {
   x: number;
   y: number;
+  z?: number;
 };
 
 export type CubicSegment = {
@@ -12,6 +13,10 @@ export type CubicSegment = {
 
 const EPS = 1e-6;
 const DEFAULT_ALPHA = 0.5;
+
+function zOf(point: Vec2): number {
+  return point.z ?? 0;
+}
 
 function chord(a: Vec2, b: Vec2, alpha: number): number {
   return Math.pow(Math.hypot(b.x - a.x, b.y - a.y), alpha);
@@ -34,14 +39,16 @@ function catmullRomSegment(
 
   const m1x = (span * (p2.x - p0.x)) / t2;
   const m1y = (span * (p2.y - p0.y)) / t2;
+  const m1z = (span * (zOf(p2) - zOf(p0))) / t2;
   const m2x = (span * (p3.x - p1.x)) / (t3 - t1);
   const m2y = (span * (p3.y - p1.y)) / (t3 - t1);
+  const m2z = (span * (zOf(p3) - zOf(p1))) / (t3 - t1);
 
   return {
-    p0: { x: p1.x, y: p1.y },
-    c1: { x: p1.x + m1x / 3, y: p1.y + m1y / 3 },
-    c2: { x: p2.x - m2x / 3, y: p2.y - m2y / 3 },
-    p1: { x: p2.x, y: p2.y },
+    p0: { x: p1.x, y: p1.y, z: zOf(p1) },
+    c1: { x: p1.x + m1x / 3, y: p1.y + m1y / 3, z: zOf(p1) + m1z / 3 },
+    c2: { x: p2.x - m2x / 3, y: p2.y - m2y / 3, z: zOf(p2) - m2z / 3 },
+    p1: { x: p2.x, y: p2.y, z: zOf(p2) },
   };
 }
 
@@ -60,6 +67,11 @@ export function evalCubic(segment: CubicSegment, u: number): Vec2 {
       3 * t2 * u * segment.c1.y +
       3 * t * u2 * segment.c2.y +
       u2 * u * segment.p1.y,
+    z:
+      t2 * t * zOf(segment.p0) +
+      3 * t2 * u * zOf(segment.c1) +
+      3 * t * u2 * zOf(segment.c2) +
+      u2 * u * zOf(segment.p1),
   };
 }
 
@@ -80,11 +92,16 @@ export function evalCubicDerivative(segment: CubicSegment, u: number): Vec2 {
 export type CurveSample = {
   x: number;
   y: number;
+  z: number;
   u: number;
 };
 
 function midpoint(a: Vec2, b: Vec2): Vec2 {
-  return { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
+  return {
+    x: (a.x + b.x) * 0.5,
+    y: (a.y + b.y) * 0.5,
+    z: (zOf(a) + zOf(b)) * 0.5,
+  };
 }
 
 function pointLineDistance(point: Vec2, a: Vec2, b: Vec2): number {
@@ -127,7 +144,7 @@ function subdivideCubic(
   out: CurveSample[],
 ): void {
   if (depth >= maxDepth || isCubicFlat(segment, flatnessPx)) {
-    out.push({ x: segment.p1.x, y: segment.p1.y, u: u1 });
+    out.push({ x: segment.p1.x, y: segment.p1.y, z: zOf(segment.p1), u: u1 });
     return;
   }
   const [left, right] = splitCubic(segment);
@@ -145,7 +162,7 @@ export function flattenCubic(
 ): CurveSample[] {
   const out: CurveSample[] = [];
   if (includeStart) {
-    out.push({ x: segment.p0.x, y: segment.p0.y, u: 0 });
+    out.push({ x: segment.p0.x, y: segment.p0.y, z: zOf(segment.p0), u: 0 });
   }
   subdivideCubic(segment, 0, 1, 0, flatnessPx, maxDepth, out);
   return out;

@@ -1,3 +1,4 @@
+import { createDepthTracker, type DepthSnapshot } from "./depth.ts";
 import { MIN_VISIBILITY } from "./wrist-history.ts";
 
 export const POSITION_SMOOTHING_TAU_MS = 25;
@@ -13,6 +14,7 @@ export const VISUAL_UNTRUSTED_STEP_SCALE = 0.75;
 export type VisualSample = {
   x: number;
   y: number;
+  z?: number;
   t: number;
   visibility?: number;
 };
@@ -86,6 +88,7 @@ export function clampVisualJump(
 
 export function createVisualTrajectory() {
   const points: VisualSample[] = [];
+  const depth = createDepthTracker();
   let smoothed: { x: number; y: number; t: number } | null = null;
   let recentRawSpeed = 0;
   let durationMs = VISUAL_TRAIL_DURATION_MS;
@@ -106,6 +109,7 @@ export function createVisualTrajectory() {
       points.push({
         x: prev.x + (point.x - prev.x) * u,
         y: prev.y + (point.y - prev.y) * u,
+        z: (prev.z ?? 0) + ((point.z ?? 0) - (prev.z ?? 0)) * u,
         t: prev.t + (point.t - prev.t) * u,
       });
     }
@@ -116,12 +120,23 @@ export function createVisualTrajectory() {
   return {
     update(point: VisualSample): void {
       prune(points, point.t, durationMs);
+      const depthSnap = depth.update(
+        point.z ?? 0,
+        point.t,
+        point.visibility ?? 0,
+      );
 
       if (!smoothed) {
         smoothed = { x: point.x, y: point.y, t: point.t };
         recentRawSpeed = 0;
         jumpDebug = { clamped: false, requested: 0, allowed: VISUAL_JUMP_DISTANCE };
-        pushFiltered({ x: point.x, y: point.y, t: point.t });
+        pushFiltered({
+          x: point.x,
+          y: point.y,
+          z: depthSnap.trackedDepth,
+          t: point.t,
+          visibility: point.visibility,
+        });
         return;
       }
 
@@ -154,7 +169,13 @@ export function createVisualTrajectory() {
       }
 
       smoothed = next;
-      pushFiltered({ x: smoothed.x, y: smoothed.y, t: point.t });
+      pushFiltered({
+        x: smoothed.x,
+        y: smoothed.y,
+        z: depthSnap.trackedDepth,
+        t: point.t,
+        visibility: point.visibility,
+      });
     },
 
     prune(timestampMs: number): void {
@@ -163,6 +184,26 @@ export function createVisualTrajectory() {
 
     setDurationMs(ms: number): void {
       durationMs = Math.max(1, ms);
+    },
+
+    setInvertZ(value: boolean): void {
+      if (!depth.setInvertZ(value)) {
+        return;
+      }
+      for (let i = 0; i < points.length; i++) {
+        points[i].z = -(points[i].z ?? 0);
+      }
+    },
+
+    recalibrateDepth(): void {
+      depth.recalibrate();
+      for (let i = 0; i < points.length; i++) {
+        points[i].z = 0;
+      }
+    },
+
+    depthSnapshot(): DepthSnapshot {
+      return depth.snapshot();
     },
 
     samples(): readonly VisualSample[] {
@@ -178,6 +219,7 @@ export function createVisualTrajectory() {
       smoothed = null;
       recentRawSpeed = 0;
       jumpDebug = { clamped: false, requested: 0, allowed: 0 };
+      depth.recalibrate();
     },
   };
 }

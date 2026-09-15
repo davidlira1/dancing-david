@@ -5,6 +5,8 @@ in vec2 a_center;
 in vec2 a_normal;
 in float a_side;
 in float a_life;
+in float a_depth;
+in float a_perspective;
 
 uniform vec2 u_resolution;
 uniform float u_maxWidth;
@@ -12,10 +14,12 @@ uniform float u_minWidthScale;
 
 out float v_side;
 out float v_life;
+out float v_depth;
+out float v_perspective;
 
 void main() {
   float widthScale = mix(u_minWidthScale, 1.0, smoothstep(0.0, 1.0, a_life));
-  float halfWidth = 0.5 * u_maxWidth * widthScale;
+  float halfWidth = 0.5 * u_maxWidth * widthScale * a_perspective;
   vec2 pos = a_center + a_normal * a_side * halfWidth;
   vec2 clip = vec2(
     (pos.x / u_resolution.x) * 2.0 - 1.0,
@@ -24,6 +28,8 @@ void main() {
   gl_Position = vec4(clip, 0.0, 1.0);
   v_side = a_side;
   v_life = a_life;
+  v_depth = a_depth;
+  v_perspective = a_perspective;
 }
 `;
 
@@ -32,12 +38,17 @@ precision highp float;
 
 in float v_side;
 in float v_life;
+in float v_depth;
+in float v_perspective;
 out vec4 fragColor;
 
 uniform float u_coreWidth;
 uniform float u_edgeSoftness;
 uniform float u_tailFadeEnd;
 uniform float u_intensity;
+uniform float u_depthEnabled;
+uniform float u_depthViz;
+uniform float u_depthBloomStrength;
 uniform vec3 u_coreColor;
 uniform vec3 u_cyan;
 uniform vec3 u_blue;
@@ -52,10 +63,24 @@ void main() {
   color = mix(color, u_coreColor, core);
   color += u_coreColor * core * 0.55;
 
+  if (u_depthEnabled > 0.5) {
+    float near = clamp(v_depth / 0.25, 0.0, 1.0);
+    float far = clamp(-v_depth / 0.25, 0.0, 1.0);
+    color = mix(color, u_violet, far * 0.18);
+    color = mix(color, u_cyan, near * 0.16);
+  }
+
+  if (u_depthViz > 0.5) {
+    vec3 viz = mix(vec3(0.18, 0.42, 1.0), vec3(0.18, 0.95, 0.32), smoothstep(-0.22, 0.0, v_depth));
+    viz = mix(viz, vec3(1.0, 0.22, 0.16), smoothstep(0.0, 0.22, v_depth));
+    color = viz + u_coreColor * core * 0.35;
+  }
+
   float edgeStart = max(0.0, 1.0 - u_edgeSoftness);
   float edgeAlpha = 1.0 - smoothstep(edgeStart, 1.0, d);
   float lifeAlpha = smoothstep(0.0, u_tailFadeEnd, v_life);
-  float alpha = edgeAlpha * lifeAlpha * u_intensity * mix(1.0, 1.2, core);
+  float depthGlow = mix(1.0, clamp(v_perspective, 0.72, 1.35), u_depthBloomStrength * u_depthEnabled);
+  float alpha = edgeAlpha * lifeAlpha * u_intensity * mix(1.0, 1.2, core) * depthGlow;
   fragColor = vec4(color, alpha);
 }
 `;

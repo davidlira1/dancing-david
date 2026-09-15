@@ -11,6 +11,7 @@ const NEIGHBOR_NEXT = 0.25;
 type Point = {
   x: number;
   y: number;
+  z: number;
   t: number;
 };
 
@@ -27,6 +28,7 @@ function toPixels(
   return samples.map((sample) => ({
     x: sample.x * width,
     y: sample.y * height,
+    z: sample.z ?? 0,
     t: sample.t,
   }));
 }
@@ -50,6 +52,10 @@ function neighborhoodSmooth(points: Point[]): Point[] {
         points[i - 1].y * NEIGHBOR_PREV +
         points[i].y * NEIGHBOR_CUR +
         points[i + 1].y * NEIGHBOR_NEXT,
+      z:
+        points[i - 1].z * NEIGHBOR_PREV +
+        points[i].z * NEIGHBOR_CUR +
+        points[i + 1].z * NEIGHBOR_NEXT,
       t: points[i].t,
     };
   }

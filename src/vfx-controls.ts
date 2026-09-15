@@ -1,3 +1,5 @@
+import { formatDepthDebug, type DepthSnapshot } from "./depth.ts";
+import { ribbonPerspectiveFromTracked } from "./webgl/projection.ts";
 import {
   applySchemeToVfx,
   assignRibbonVfxConfig,
@@ -23,6 +25,11 @@ const SLIDERS: SliderSpec[] = [
   { key: "bloomRadius", suffix: "", digits: 1 },
   { key: "bloomIntensity", suffix: "", digits: 2 },
   { key: "trailDurationMs", suffix: " ms", digits: 0 },
+  { key: "depthStrength", suffix: "", digits: 2 },
+  { key: "perspectiveStrength", suffix: "", digits: 2 },
+  { key: "minPerspectiveScale", suffix: "", digits: 2 },
+  { key: "maxPerspectiveScale", suffix: "", digits: 2 },
+  { key: "depthBloomStrength", suffix: "", digits: 2 },
 ];
 
 const COLOR_KEYS = [
@@ -32,18 +39,32 @@ const COLOR_KEYS = [
   "bloomColor",
 ] as const;
 
+const CHECKBOX_KEYS = ["depthEnabled", "depthViz", "invertZ"] as const;
+
+const DEPTH_METER_RANGE = 0.4;
+
 function formatValue(spec: SliderSpec, value: number): string {
   return `${value.toFixed(spec.digits)}${spec.suffix}`;
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
 }
 
 export function createVfxControls(options: {
   config: RibbonVfxConfig;
   onChange: () => void;
-}): { syncFromConfig: () => void } {
-  const { config, onChange } = options;
+  onRecalibrate: () => void;
+}): {
+  syncFromConfig: () => void;
+  updateDepthMeter: (snapshot: DepthSnapshot) => void;
+} {
+  const { config, onChange, onRecalibrate } = options;
   const panel = document.querySelector<HTMLElement>("#ribbon-vfx")!;
   const toggle = document.querySelector<HTMLButtonElement>("#ribbon-vfx-toggle")!;
   const body = document.querySelector<HTMLElement>("#ribbon-vfx-body")!;
+  const depthDebug = document.querySelector<HTMLElement>("#vfx-depth-debug");
+  const depthMarker = document.querySelector<HTMLElement>("#vfx-depth-marker");
 
   function syncSchemeButtons(activeId: string | null): void {
     for (const scheme of RIBBON_SCHEMES) {
@@ -78,6 +99,12 @@ export function createVfxControls(options: {
       const input = document.querySelector<HTMLInputElement>(`#vfx-${key}`);
       if (input) {
         input.value = config[key].toLowerCase();
+      }
+    }
+    for (const key of CHECKBOX_KEYS) {
+      const input = document.querySelector<HTMLInputElement>(`#vfx-${key}`);
+      if (input) {
+        input.checked = config[key];
       }
     }
   }
@@ -123,6 +150,20 @@ export function createVfxControls(options: {
     });
   }
 
+  for (const key of CHECKBOX_KEYS) {
+    const input = document.querySelector<HTMLInputElement>(`#vfx-${key}`);
+    input?.addEventListener("change", () => {
+      config[key] = input.checked;
+      emit();
+    });
+  }
+
+  document
+    .querySelector<HTMLButtonElement>("#vfx-recalibrate")
+    ?.addEventListener("click", () => {
+      onRecalibrate();
+    });
+
   document
     .querySelector<HTMLButtonElement>("#vfx-reset")
     ?.addEventListener("click", () => {
@@ -161,5 +202,30 @@ export function createVfxControls(options: {
 
   syncFromConfig();
   syncSchemeButtons("electric");
-  return { syncFromConfig };
+
+  return {
+    syncFromConfig,
+    updateDepthMeter(snapshot: DepthSnapshot): void {
+      const { visualDepth, perspectiveScale } = ribbonPerspectiveFromTracked(
+        snapshot.trackedDepth,
+        config,
+      );
+      if (depthDebug) {
+        depthDebug.textContent = formatDepthDebug({
+          ...snapshot,
+          visualDepth,
+          perspectiveScale,
+        });
+      }
+      if (depthMarker) {
+        const t = snapshot.calibrating
+          ? 0.5
+          : clamp01(
+              (snapshot.trackedDepth + DEPTH_METER_RANGE) /
+                (DEPTH_METER_RANGE * 2),
+            );
+        depthMarker.style.left = `${t * 100}%`;
+      }
+    },
+  };
 }

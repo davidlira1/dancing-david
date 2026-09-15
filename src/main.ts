@@ -11,6 +11,8 @@ import {
   drawTrackingDebug,
   formatTrackingDebug,
 } from "./tracking-debug.ts";
+import { formatDepthDebug } from "./depth.ts";
+import { ribbonPerspectiveFromTracked } from "./webgl/projection.ts";
 import { createVfxControls } from "./vfx-controls.ts";
 import { createRibbonRenderer } from "./webgl/ribbon-renderer.ts";
 import { createRibbonVfxConfig } from "./webgl/visual.ts";
@@ -38,6 +40,23 @@ const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
 const vfxConfig = createRibbonVfxConfig();
+const vfxControls = createVfxControls({
+  config: vfxConfig,
+  onChange: () => {
+    visualRight.setDurationMs(vfxConfig.trailDurationMs);
+    visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+    visualRight.setInvertZ(vfxConfig.invertZ);
+    visualLeft.setInvertZ(vfxConfig.invertZ);
+  },
+  onRecalibrate: () => {
+    visualRight.recalibrateDepth();
+    visualLeft.recalibrateDepth();
+  },
+});
+visualRight.setDurationMs(vfxConfig.trailDurationMs);
+visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+visualRight.setInvertZ(vfxConfig.invertZ);
+visualLeft.setInvertZ(vfxConfig.invertZ);
 let lastSwipeLabel = "—";
 let lastMotion: MotionSnapshot | null = null;
 
@@ -54,14 +73,6 @@ const auraToggle = document.querySelector<HTMLButtonElement>("#toggle-aura")!;
 const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")!;
 const trackingToggle =
   document.querySelector<HTMLButtonElement>("#toggle-tracking")!;
-
-createVfxControls({
-  config: vfxConfig,
-  onChange: () => {
-    visualRight.setDurationMs(vfxConfig.trailDurationMs);
-    visualLeft.setDurationMs(vfxConfig.trailDurationMs);
-  },
-});
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -187,6 +198,7 @@ async function main(): Promise<void> {
               visualRight.update({
                 x: rightWrist.x,
                 y: rightWrist.y,
+                z: rightWrist.z,
                 t: now,
                 visibility: rightWrist.visibility,
               });
@@ -199,6 +211,7 @@ async function main(): Promise<void> {
               visualLeft.update({
                 x: leftWrist.x,
                 y: leftWrist.y,
+                z: leftWrist.z,
                 t: now,
                 visibility: leftWrist.visibility,
               });
@@ -218,6 +231,8 @@ async function main(): Promise<void> {
 
         visualRight.setDurationMs(vfxConfig.trailDurationMs);
         visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+        const depthSnap = visualRight.depthSnapshot();
+        vfxControls.updateDepthMeter(depthSnap);
         if (ribbonRenderer && video.videoWidth > 0 && video.videoHeight > 0) {
           ribbonRenderer.resize(
             video.videoWidth,
@@ -279,7 +294,16 @@ async function main(): Promise<void> {
             snapshot,
             !visibility.skeleton,
           );
-          debugEl.textContent = formatTrackingDebug(snapshot);
+          debugEl.textContent =
+            formatTrackingDebug(snapshot) +
+            "\n" +
+            formatDepthDebug({
+              ...depthSnap,
+              ...ribbonPerspectiveFromTracked(
+                depthSnap.trackedDepth,
+                vfxConfig,
+              ),
+            });
         }
 
         if (visibility.energySwipe) {

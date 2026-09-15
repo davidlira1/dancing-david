@@ -226,6 +226,57 @@ h1 {
   cursor: pointer;
 }
 
+#ribbon-vfx label.vfx-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+#ribbon-vfx label.vfx-check input {
+  width: auto;
+}
+
+.depth-meter {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.depth-meter pre {
+  margin: 0;
+  font: 12px/1.4 ui-monospace, Consolas, monospace;
+  color: #c8c8d0;
+}
+
+.depth-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: #8b8b96;
+}
+
+.depth-track {
+  position: relative;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #3d7dff, #3dff6b, #ff4b4b);
+}
+
+.depth-marker {
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 4px;
+  height: 14px;
+  margin-left: -2px;
+  background: #fff;
+  border-radius: 1px;
+}
+
 .vfx-actions {
   display: flex;
   flex-wrap: wrap;
