@@ -77,6 +77,80 @@ export function evalCubicDerivative(segment: CubicSegment, u: number): Vec2 {
   };
 }
 
+export type CurveSample = {
+  x: number;
+  y: number;
+  u: number;
+};
+
+function midpoint(a: Vec2, b: Vec2): Vec2 {
+  return { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
+}
+
+function pointLineDistance(point: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < EPS * EPS) {
+    return Math.hypot(point.x - a.x, point.y - a.y);
+  }
+  return Math.abs((point.x - a.x) * dy - (point.y - a.y) * dx) / Math.sqrt(lenSq);
+}
+
+export function splitCubic(segment: CubicSegment): [CubicSegment, CubicSegment] {
+  const p01 = midpoint(segment.p0, segment.c1);
+  const p12 = midpoint(segment.c1, segment.c2);
+  const p23 = midpoint(segment.c2, segment.p1);
+  const p012 = midpoint(p01, p12);
+  const p123 = midpoint(p12, p23);
+  const p0123 = midpoint(p012, p123);
+  return [
+    { p0: segment.p0, c1: p01, c2: p012, p1: p0123 },
+    { p0: p0123, c1: p123, c2: p23, p1: segment.p1 },
+  ];
+}
+
+export function isCubicFlat(segment: CubicSegment, tolerancePx: number): boolean {
+  return (
+    pointLineDistance(segment.c1, segment.p0, segment.p1) <= tolerancePx &&
+    pointLineDistance(segment.c2, segment.p0, segment.p1) <= tolerancePx
+  );
+}
+
+function subdivideCubic(
+  segment: CubicSegment,
+  u0: number,
+  u1: number,
+  depth: number,
+  flatnessPx: number,
+  maxDepth: number,
+  out: CurveSample[],
+): void {
+  if (depth >= maxDepth || isCubicFlat(segment, flatnessPx)) {
+    out.push({ x: segment.p1.x, y: segment.p1.y, u: u1 });
+    return;
+  }
+  const [left, right] = splitCubic(segment);
+  const um = (u0 + u1) * 0.5;
+  subdivideCubic(left, u0, um, depth + 1, flatnessPx, maxDepth, out);
+  subdivideCubic(right, um, u1, depth + 1, flatnessPx, maxDepth, out);
+}
+
+/** Adaptive cubic samples in pixel space. Optionally skip the start (shared joints). */
+export function flattenCubic(
+  segment: CubicSegment,
+  flatnessPx: number,
+  maxDepth: number,
+  includeStart = true,
+): CurveSample[] {
+  const out: CurveSample[] = [];
+  if (includeStart) {
+    out.push({ x: segment.p0.x, y: segment.p0.y, u: 0 });
+  }
+  subdivideCubic(segment, 0, 1, 0, flatnessPx, maxDepth, out);
+  return out;
+}
+
 export function catmullRomToBezierPath(
   points: readonly Vec2[],
   alpha = DEFAULT_ALPHA,

@@ -12,7 +12,13 @@ import {
   formatTrackingDebug,
 } from "./tracking-debug.ts";
 import { createRibbonRenderer } from "./webgl/ribbon-renderer.ts";
-import { createWristTrail, MIN_VISIBILITY, RIGHT_WRIST_INDEX } from "./wrist-history.ts";
+import { DEFAULT_SCHEME, RIBBON_SCHEMES } from "./webgl/visual.ts";
+import {
+  createWristTrail,
+  LEFT_WRIST_INDEX,
+  MIN_VISIBILITY,
+  RIGHT_WRIST_INDEX,
+} from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
 import { createVisualTrajectory } from "./visual-trajectory.ts";
 
@@ -25,7 +31,8 @@ const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const debugEl = document.querySelector<HTMLPreElement>("#motion-debug")!;
 const wristTrail = createWristTrail();
-const visualTrajectory = createVisualTrajectory();
+const visualRight = createVisualTrajectory();
+const visualLeft = createVisualTrajectory();
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
@@ -45,6 +52,32 @@ const auraToggle = document.querySelector<HTMLButtonElement>("#toggle-aura")!;
 const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")!;
 const trackingToggle =
   document.querySelector<HTMLButtonElement>("#toggle-tracking")!;
+
+function syncSchemeButtons(activeId: string): void {
+  for (const scheme of RIBBON_SCHEMES) {
+    const button = document.querySelector<HTMLButtonElement>(
+      `#scheme-${scheme.id}`,
+    );
+    if (!button) {
+      continue;
+    }
+    button.setAttribute(
+      "aria-pressed",
+      scheme.id === activeId ? "true" : "false",
+    );
+  }
+}
+
+for (const scheme of RIBBON_SCHEMES) {
+  const button = document.querySelector<HTMLButtonElement>(
+    `#scheme-${scheme.id}`,
+  );
+  button?.addEventListener("click", () => {
+    ribbonRenderer?.setScheme(scheme);
+    syncSchemeButtons(scheme.id);
+  });
+}
+syncSchemeButtons(DEFAULT_SCHEME.id);
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -137,9 +170,14 @@ async function main(): Promise<void> {
       let lastRawWrist: { x: number; y: number } | null = null;
       let lastVisibility = 0;
       const visionTimes: number[] = [];
+      const renderTimes: number[] = [];
 
       const tick = (): void => {
         const now = performance.now();
+        renderTimes.push(now);
+        while (renderTimes.length > 0 && renderTimes[0] < now - 1000) {
+          renderTimes.shift();
+        }
         while (visionTimes.length > 0 && visionTimes[0] < now - 1000) {
           visionTimes.shift();
         }
@@ -156,20 +194,32 @@ async function main(): Promise<void> {
               drawAura(auraCanvas, video, mask);
             }
             wristTrail.update(result.landmarks[0], now);
-            const wrist = result.landmarks[0]?.[RIGHT_WRIST_INDEX];
-            if (wrist && wrist.visibility >= MIN_VISIBILITY) {
-              lastRawWrist = { x: wrist.x, y: wrist.y };
-              lastVisibility = wrist.visibility;
-              visualTrajectory.update({
-                x: wrist.x,
-                y: wrist.y,
+            const landmarks = result.landmarks[0];
+            const rightWrist = landmarks?.[RIGHT_WRIST_INDEX];
+            const leftWrist = landmarks?.[LEFT_WRIST_INDEX];
+            if (rightWrist && rightWrist.visibility >= MIN_VISIBILITY) {
+              lastRawWrist = { x: rightWrist.x, y: rightWrist.y };
+              lastVisibility = rightWrist.visibility;
+              visualRight.update({
+                x: rightWrist.x,
+                y: rightWrist.y,
                 t: now,
-                visibility: wrist.visibility,
+                visibility: rightWrist.visibility,
               });
             } else {
               lastRawWrist = null;
-              lastVisibility = wrist?.visibility ?? 0;
-              visualTrajectory.prune(now);
+              lastVisibility = rightWrist?.visibility ?? 0;
+              visualRight.prune(now);
+            }
+            if (leftWrist && leftWrist.visibility >= MIN_VISIBILITY) {
+              visualLeft.update({
+                x: leftWrist.x,
+                y: leftWrist.y,
+                t: now,
+                visibility: leftWrist.visibility,
+              });
+            } else {
+              visualLeft.prune(now);
             }
             const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
             lastMotion = motion;
@@ -189,12 +239,20 @@ async function main(): Promise<void> {
             window.devicePixelRatio || 1,
           );
           ribbonRenderer.render(
-            buildTrailGeometry(
-              visualTrajectory.samples(),
-              now,
-              video.videoWidth,
-              video.videoHeight,
-            ),
+            {
+              right: buildTrailGeometry(
+                visualRight.samples(),
+                now,
+                video.videoWidth,
+                video.videoHeight,
+              ),
+              left: buildTrailGeometry(
+                visualLeft.samples(),
+                now,
+                video.videoWidth,
+                video.videoHeight,
+              ),
+            },
             now,
           );
         }
@@ -204,9 +262,10 @@ async function main(): Promise<void> {
         }
 
         if (visibility.tracking) {
-          const samples = visualTrajectory.samples();
+          const samples = visualRight.samples();
           const filtered = samples[samples.length - 1] ?? null;
-          const jump = visualTrajectory.jumpDebug();
+          const jump = visualRight.jumpDebug();
+          const ribbonStats = ribbonRenderer?.stats();
           const snapshot = {
             raw: lastRawWrist,
             filtered: filtered
@@ -215,6 +274,10 @@ async function main(): Promise<void> {
             head: ribbonRenderer?.lastHead() ?? null,
             visibility: lastVisibility,
             visionFps: visionTimes.length,
+            renderFps: renderTimes.length,
+            ribbonVertices: ribbonStats?.vertexCount ?? 0,
+            bloomWidth: ribbonStats?.bloomWidth ?? 0,
+            bloomHeight: ribbonStats?.bloomHeight ?? 0,
             width: video.videoWidth,
             height: video.videoHeight,
             jumpClamped: jump.clamped,

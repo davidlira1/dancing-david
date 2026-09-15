@@ -66,6 +66,7 @@ h1 {
 #ribbon-gl {
   z-index: 2;
   pointer-events: none;
+  mix-blend-mode: plus-lighter;
 }
 
 #effects {
@@ -98,14 +99,16 @@ h1 {
   min-width: 16ch;
 }
 
-#layer-toggles {
+#layer-toggles,
+#color-schemes {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
 }
 
-#layer-toggles button {
+#layer-toggles button,
+#color-schemes button {
   font: inherit;
   padding: 6px 12px;
   border: 0;
@@ -115,7 +118,8 @@ h1 {
   cursor: pointer;
 }
 
-#layer-toggles button[aria-pressed="false"] {
+#layer-toggles button[aria-pressed="false"],
+#color-schemes button[aria-pressed="false"] {
   background: #2a2b33;
   color: #8b8b96;
 }

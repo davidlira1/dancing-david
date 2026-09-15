@@ -9,6 +9,10 @@ export type TrackingDebugSnapshot = {
   head: MarkerPoint | null;
   visibility: number;
   visionFps: number;
+  renderFps: number;
+  ribbonVertices: number;
+  bloomWidth: number;
+  bloomHeight: number;
   width: number;
   height: number;
   jumpClamped: boolean;
@@ -90,7 +94,10 @@ export function formatTrackingDebug(snapshot: TrackingDebugSnapshot): string {
   const jumpPx = snapshot.jumpRequested * snapshot.width;
   const allowedPx = snapshot.jumpAllowed * snapshot.width;
   return (
+    `Render FPS: ${snapshot.renderFps.toFixed(0)}\n` +
     `Vision FPS: ${snapshot.visionFps.toFixed(0)}\n` +
+    `Ribbon vertices: ${snapshot.ribbonVertices}\n` +
+    `Bloom: ${snapshot.bloomWidth} × ${snapshot.bloomHeight}\n` +
     `Visibility: ${snapshot.visibility.toFixed(2)}\n` +
     `Raw → Filtered: ${rawToFiltered === null ? "—" : `${rawToFiltered.toFixed(0)} px`}\n` +
     `Filtered → Ribbon: ${filteredToHead === null ? "—" : `${filteredToHead.toFixed(0)} px`}\n` +

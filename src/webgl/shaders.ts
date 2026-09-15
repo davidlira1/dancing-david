@@ -35,26 +35,101 @@ in float v_life;
 out vec4 fragColor;
 
 uniform float u_coreWidth;
+uniform float u_edgeSoftness;
 uniform float u_tailFadeEnd;
 uniform float u_intensity;
+uniform vec3 u_coreColor;
+uniform vec3 u_cyan;
+uniform vec3 u_blue;
+uniform vec3 u_violet;
 
 void main() {
   float d = abs(v_side);
-  vec3 white = vec3(0.95, 0.98, 1.0);
-  vec3 cyan = vec3(0.27, 0.86, 1.0);
-  vec3 blue = vec3(0.28, 0.38, 1.0);
-  vec3 violet = vec3(0.58, 0.22, 1.0);
-
   float core = 1.0 - smoothstep(0.0, u_coreWidth, d);
-  vec3 color = violet;
-  color = mix(color, blue, smoothstep(0.88, 0.48, d));
-  color = mix(color, cyan, smoothstep(0.42, 0.14, d));
-  color = mix(color, white, core);
+  vec3 color = u_violet;
+  color = mix(color, u_blue, smoothstep(0.88, 0.48, d));
+  color = mix(color, u_cyan, smoothstep(0.46, 0.16, d));
+  color = mix(color, u_coreColor, core);
+  color += u_coreColor * core * 0.55;
 
-  float edgeAlpha = 1.0 - smoothstep(0.72, 1.0, d);
+  float edgeStart = max(0.0, 1.0 - u_edgeSoftness);
+  float edgeAlpha = 1.0 - smoothstep(edgeStart, 1.0, d);
   float lifeAlpha = smoothstep(0.0, u_tailFadeEnd, v_life);
-  float alpha = edgeAlpha * lifeAlpha * u_intensity;
+  float alpha = edgeAlpha * lifeAlpha * u_intensity * mix(1.0, 1.2, core);
   fragColor = vec4(color, alpha);
+}
+`;
+
+export const FULLSCREEN_VERTEX_SHADER = `#version 300 es
+precision highp float;
+
+in vec2 a_position;
+out vec2 v_uv;
+
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+  v_uv = a_position * 0.5 + 0.5;
+}
+`;
+
+export const BLUR_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform sampler2D u_source;
+uniform vec2 u_texel;
+uniform vec2 u_direction;
+uniform float u_radius;
+uniform float u_threshold;
+
+// 13-tap Gaussian, sigma ~2.5, normalized.
+const float W0 = 0.16098;
+const float W1 = 0.14860;
+const float W2 = 0.11691;
+const float W3 = 0.07838;
+const float W4 = 0.04476;
+const float W5 = 0.02179;
+const float W6 = 0.00903;
+
+vec4 tap(vec2 uv) {
+  vec4 color = texture(u_source, uv);
+  float brightness = max(color.r, max(color.g, color.b));
+  float gate = step(u_threshold, brightness);
+  return color * gate;
+}
+
+void main() {
+  vec2 stepDir = u_direction * u_texel * u_radius;
+  vec4 acc = tap(v_uv) * W0;
+  acc += (tap(v_uv + stepDir) + tap(v_uv - stepDir)) * W1;
+  acc += (tap(v_uv + stepDir * 2.0) + tap(v_uv - stepDir * 2.0)) * W2;
+  acc += (tap(v_uv + stepDir * 3.0) + tap(v_uv - stepDir * 3.0)) * W3;
+  acc += (tap(v_uv + stepDir * 4.0) + tap(v_uv - stepDir * 4.0)) * W4;
+  acc += (tap(v_uv + stepDir * 5.0) + tap(v_uv - stepDir * 5.0)) * W5;
+  acc += (tap(v_uv + stepDir * 6.0) + tap(v_uv - stepDir * 6.0)) * W6;
+  fragColor = acc;
+}
+`;
+
+export const COMPOSITE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform sampler2D u_ribbonTexture;
+uniform sampler2D u_bloomTexture;
+uniform float u_bloomIntensity;
+uniform vec3 u_bloomTint;
+
+void main() {
+  vec4 ribbon = texture(u_ribbonTexture, v_uv);
+  vec4 bloom = texture(u_bloomTexture, v_uv);
+  vec3 rgb = ribbon.rgb + bloom.rgb * u_bloomIntensity * u_bloomTint;
+  float alpha = ribbon.a + bloom.a * u_bloomIntensity;
+  fragColor = vec4(rgb, alpha);
 }
 `;
 

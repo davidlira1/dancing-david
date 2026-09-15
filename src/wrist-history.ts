@@ -2,6 +2,7 @@ import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 
 export const TRAIL_DURATION_MS = 500;
 export const MIN_VISIBILITY = 0.5;
+export const LEFT_WRIST_INDEX = 15;
 export const RIGHT_WRIST_INDEX = 16;
 
 export type WristSample = {
