@@ -1,3 +1,4 @@
+import type { PoseLandmarkerResult } from "@mediapipe/tasks-vision";
 import "./style.css";
 import { drawAura } from "./aura.ts";
 import { startCamera } from "./camera.ts";
@@ -6,6 +7,10 @@ import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
 import { updatePersonMask } from "./segmentation.ts";
 import { buildTrailGeometry } from "./trail.ts";
+import {
+  drawTrackingDebug,
+  formatTrackingDebug,
+} from "./tracking-debug.ts";
 import { createRibbonRenderer } from "./webgl/ribbon-renderer.ts";
 import { createWristTrail, MIN_VISIBILITY, RIGHT_WRIST_INDEX } from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
@@ -25,17 +30,21 @@ const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
 let lastSwipeLabel = "—";
+let lastMotion: MotionSnapshot | null = null;
 
 const visibility = {
   skeleton: true,
   aura: true,
   energySwipe: true,
+  tracking: false,
 };
 
 const skeletonToggle =
   document.querySelector<HTMLButtonElement>("#toggle-skeleton")!;
 const auraToggle = document.querySelector<HTMLButtonElement>("#toggle-aura")!;
 const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")!;
+const trackingToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-tracking")!;
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -83,6 +92,19 @@ energyToggle.addEventListener("click", () => {
   }
 });
 
+trackingToggle.addEventListener("click", () => {
+  visibility.tracking = !visibility.tracking;
+  syncToggle(trackingToggle, "DEBUG TRACKING", visibility.tracking);
+  if (!visibility.tracking) {
+    if (!visibility.skeleton) {
+      clearCanvas(overlayCanvas);
+    }
+    if (lastMotion) {
+      updateMotionDebug(lastMotion);
+    }
+  }
+});
+
 function updateMotionDebug(motion: MotionSnapshot): void {
   if (motion.event) {
     lastSwipeLabel = `SWIPE ${motion.event.direction}`;
@@ -111,11 +133,24 @@ async function main(): Promise<void> {
       );
 
       let lastVideoTime = -1;
+      let lastPoseResult: PoseLandmarkerResult | null = null;
+      let lastRawWrist: { x: number; y: number } | null = null;
+      let lastVisibility = 0;
+      const visionTimes: number[] = [];
+
       const tick = (): void => {
         const now = performance.now();
+        while (visionTimes.length > 0 && visionTimes[0] < now - 1000) {
+          visionTimes.shift();
+        }
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
           detectPose(landmarker, video, now, (result) => {
+            lastPoseResult = result;
+            visionTimes.push(now);
+            while (visionTimes.length > 0 && visionTimes[0] < now - 1000) {
+              visionTimes.shift();
+            }
             if (visibility.aura) {
               const mask = updatePersonMask(result);
               drawAura(auraCanvas, video, mask);
@@ -123,6 +158,8 @@ async function main(): Promise<void> {
             wristTrail.update(result.landmarks[0], now);
             const wrist = result.landmarks[0]?.[RIGHT_WRIST_INDEX];
             if (wrist && wrist.visibility >= MIN_VISIBILITY) {
+              lastRawWrist = { x: wrist.x, y: wrist.y };
+              lastVisibility = wrist.visibility;
               visualTrajectory.update({
                 x: wrist.x,
                 y: wrist.y,
@@ -130,34 +167,69 @@ async function main(): Promise<void> {
                 visibility: wrist.visibility,
               });
             } else {
+              lastRawWrist = null;
+              lastVisibility = wrist?.visibility ?? 0;
               visualTrajectory.prune(now);
             }
             const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
-            updateMotionDebug(motion);
+            lastMotion = motion;
+            if (!visibility.tracking) {
+              updateMotionDebug(motion);
+            }
             if (visibility.energySwipe && motion.event) {
               energySwipe.spawn(motion.event);
             }
-            if (ribbonRenderer && video.videoWidth > 0 && video.videoHeight > 0) {
-              ribbonRenderer.resize(
-                video.videoWidth,
-                video.videoHeight,
-                window.devicePixelRatio || 1,
-              );
-              ribbonRenderer.render(
-                buildTrailGeometry(
-                  visualTrajectory.samples(),
-                  now,
-                  video.videoWidth,
-                  video.videoHeight,
-                ),
-                now,
-              );
-            }
-            if (visibility.skeleton) {
-              drawPose(overlayCanvas, video, result);
-            }
           });
         }
+
+        if (ribbonRenderer && video.videoWidth > 0 && video.videoHeight > 0) {
+          ribbonRenderer.resize(
+            video.videoWidth,
+            video.videoHeight,
+            window.devicePixelRatio || 1,
+          );
+          ribbonRenderer.render(
+            buildTrailGeometry(
+              visualTrajectory.samples(),
+              now,
+              video.videoWidth,
+              video.videoHeight,
+            ),
+            now,
+          );
+        }
+
+        if (visibility.skeleton && lastPoseResult) {
+          drawPose(overlayCanvas, video, lastPoseResult);
+        }
+
+        if (visibility.tracking) {
+          const samples = visualTrajectory.samples();
+          const filtered = samples[samples.length - 1] ?? null;
+          const jump = visualTrajectory.jumpDebug();
+          const snapshot = {
+            raw: lastRawWrist,
+            filtered: filtered
+              ? { x: filtered.x, y: filtered.y }
+              : null,
+            head: ribbonRenderer?.lastHead() ?? null,
+            visibility: lastVisibility,
+            visionFps: visionTimes.length,
+            width: video.videoWidth,
+            height: video.videoHeight,
+            jumpClamped: jump.clamped,
+            jumpRequested: jump.requested,
+            jumpAllowed: jump.allowed,
+          };
+          drawTrackingDebug(
+            overlayCanvas,
+            video,
+            snapshot,
+            !visibility.skeleton,
+          );
+          debugEl.textContent = formatTrackingDebug(snapshot);
+        }
+
         if (visibility.energySwipe) {
           energySwipe.draw(effectsCanvas, video, now);
         }

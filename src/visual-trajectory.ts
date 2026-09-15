@@ -1,20 +1,26 @@
 import { MIN_VISIBILITY } from "./wrist-history.ts";
 
-export const POSITION_SMOOTHING_TAU_MS = 45;
+export const POSITION_SMOOTHING_TAU_MS = 25;
 export const VISUAL_TRAIL_DURATION_MS = 1900;
 export const MAX_SPACING = 0.01;
 export const MAX_INTERP = 10;
 export const VISUAL_JUMP_DISTANCE = 0.1;
 export const VISUAL_JUMP_SPEED_MULT = 5;
-export const VISUAL_CONFIDENT_VISIBILITY = 0.8;
-export const VISUAL_UNTRUSTED_TAU_MULT = 2;
-export const VISUAL_UNTRUSTED_STEP_SCALE = 0.4;
+export const VISUAL_CONFIDENT_VISIBILITY = 0.65;
+export const VISUAL_UNTRUSTED_TAU_MULT = 1.25;
+export const VISUAL_UNTRUSTED_STEP_SCALE = 0.75;
 
 export type VisualSample = {
   x: number;
   y: number;
   t: number;
   visibility?: number;
+};
+
+export type JumpDebug = {
+  clamped: boolean;
+  requested: number;
+  allowed: number;
 };
 
 function prune(points: VisualSample[], timestampMs: number): void {
@@ -51,30 +57,34 @@ export function clampVisualJump(
   dtMs: number,
   recentSpeed: number,
   trust: number,
-): { x: number; y: number } {
+): { x: number; y: number; requested: number; allowed: number; clamped: boolean } {
   const dx = raw.x - origin.x;
   const dy = raw.y - origin.y;
-  const dist = Math.hypot(dx, dy);
+  const requested = Math.hypot(dx, dy);
   const speedCap = recentSpeed * Math.max(dtMs, 1) * VISUAL_JUMP_SPEED_MULT;
-  const maxStep =
+  const allowed =
     Math.max(VISUAL_JUMP_DISTANCE, speedCap) *
     lerp(VISUAL_UNTRUSTED_STEP_SCALE, 1, trust);
 
-  if (dist <= maxStep || dist === 0) {
-    return raw;
+  if (requested <= allowed || requested === 0) {
+    return { x: raw.x, y: raw.y, requested, allowed, clamped: false };
   }
 
-  const scale = maxStep / dist;
+  const scale = allowed / requested;
   return {
     x: origin.x + dx * scale,
     y: origin.y + dy * scale,
+    requested,
+    allowed,
+    clamped: true,
   };
 }
 
 export function createVisualTrajectory() {
   const points: VisualSample[] = [];
   let smoothed: { x: number; y: number; t: number } | null = null;
-  let recentSpeed = 0;
+  let recentRawSpeed = 0;
+  let jumpDebug: JumpDebug = { clamped: false, requested: 0, allowed: 0 };
 
   function pushFiltered(point: VisualSample): void {
     if (points.length === 0) {
@@ -104,7 +114,8 @@ export function createVisualTrajectory() {
 
       if (!smoothed) {
         smoothed = { x: point.x, y: point.y, t: point.t };
-        recentSpeed = 0;
+        recentRawSpeed = 0;
+        jumpDebug = { clamped: false, requested: 0, allowed: VISUAL_JUMP_DISTANCE };
         pushFiltered({ x: point.x, y: point.y, t: point.t });
         return;
       }
@@ -115,9 +126,14 @@ export function createVisualTrajectory() {
         point,
         smoothed,
         dt,
-        recentSpeed,
+        recentRawSpeed,
         trust,
       );
+      jumpDebug = {
+        clamped: clamped.clamped,
+        requested: clamped.requested,
+        allowed: clamped.allowed,
+      };
       const tau =
         POSITION_SMOOTHING_TAU_MS *
         lerp(VISUAL_UNTRUSTED_TAU_MULT, 1, trust);
@@ -129,7 +145,7 @@ export function createVisualTrajectory() {
       };
 
       if (dt > 0) {
-        recentSpeed = Math.hypot(next.x - smoothed.x, next.y - smoothed.y) / dt;
+        recentRawSpeed = clamped.requested / dt;
       }
 
       smoothed = next;
@@ -144,10 +160,15 @@ export function createVisualTrajectory() {
       return points;
     },
 
+    jumpDebug(): JumpDebug {
+      return jumpDebug;
+    },
+
     clear(): void {
       points.length = 0;
       smoothed = null;
-      recentSpeed = 0;
+      recentRawSpeed = 0;
+      jumpDebug = { clamped: false, requested: 0, allowed: 0 };
     },
   };
 }

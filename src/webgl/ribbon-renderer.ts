@@ -29,6 +29,7 @@ export type CenterSample = {
 export type RibbonRenderer = {
   resize(videoWidth: number, videoHeight: number, dpr: number): void;
   render(segments: TimedSegment[], nowMs: number): void;
+  lastHead(): { x: number; y: number } | null;
   dispose(): void;
 };
 
@@ -81,7 +82,7 @@ export function sampleRibbonCenterline(
   }
 
   if (samples.length > MAX_SAMPLES) {
-    samples.length = MAX_SAMPLES;
+    samples.splice(0, samples.length - MAX_SAMPLES);
   }
 
   averageInteriorNormals(samples);
@@ -201,6 +202,7 @@ export function createRibbonRenderer(
 
   let videoWidth = 1;
   let videoHeight = 1;
+  let head: { x: number; y: number } | null = null;
 
   gpu.disable(gpu.DEPTH_TEST);
   gpu.enable(gpu.BLEND);
@@ -241,13 +243,20 @@ export function createRibbonRenderer(
       gpu.viewport(0, 0, canvas.width, canvas.height);
       gpu.clear(gpu.COLOR_BUFFER_BIT);
       if (segments.length === 0) {
+        head = null;
         return;
       }
 
       const samples = sampleRibbonCenterline(segments, nowMs);
       if (samples.length < 2) {
+        head = samples[0]
+          ? { x: samples[0].x, y: samples[0].y }
+          : null;
         return;
       }
+
+      const tip = samples[samples.length - 1];
+      head = { x: tip.x, y: tip.y };
 
       const vertexCount = writeStripVertices(samples, vertices);
       gpu.bindBuffer(gpu.ARRAY_BUFFER, buffer);
@@ -258,6 +267,10 @@ export function createRibbonRenderer(
       );
       gpu.bindBuffer(gpu.ARRAY_BUFFER, null);
       drawRibbonMesh(vertexCount);
+    },
+
+    lastHead(): { x: number; y: number } | null {
+      return head;
     },
 
     dispose(): void {
