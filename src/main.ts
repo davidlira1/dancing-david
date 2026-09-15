@@ -24,9 +24,62 @@ const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 let lastSwipeLabel = "—";
 
+const visibility = {
+  skeleton: true,
+  aura: true,
+  energySwipe: true,
+};
+
+const skeletonToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-skeleton")!;
+const auraToggle = document.querySelector<HTMLButtonElement>("#toggle-aura")!;
+const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")!;
+
 function setStatus(message: string): void {
   statusEl.textContent = message;
 }
+
+function clearCanvas(canvas: HTMLCanvasElement): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    return;
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function syncToggle(
+  button: HTMLButtonElement,
+  label: string,
+  on: boolean,
+): void {
+  button.textContent = `${label}: ${on ? "ON" : "OFF"}`;
+  button.setAttribute("aria-pressed", on ? "true" : "false");
+}
+
+skeletonToggle.addEventListener("click", () => {
+  visibility.skeleton = !visibility.skeleton;
+  syncToggle(skeletonToggle, "Skeleton", visibility.skeleton);
+  if (!visibility.skeleton) {
+    clearCanvas(overlayCanvas);
+  }
+});
+
+auraToggle.addEventListener("click", () => {
+  visibility.aura = !visibility.aura;
+  syncToggle(auraToggle, "Aura", visibility.aura);
+  if (!visibility.aura) {
+    clearCanvas(auraCanvas);
+  }
+});
+
+energyToggle.addEventListener("click", () => {
+  visibility.energySwipe = !visibility.energySwipe;
+  syncToggle(energyToggle, "Energy Swipe", visibility.energySwipe);
+  if (!visibility.energySwipe) {
+    clearCanvas(effectsCanvas);
+  }
+});
 
 function updateMotionDebug(motion: MotionSnapshot): void {
   if (motion.event) {
@@ -57,8 +110,10 @@ async function main(): Promise<void> {
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
           detectPose(landmarker, video, now, (result) => {
-            const mask = updatePersonMask(result);
-            drawAura(auraCanvas, video, mask);
+            if (visibility.aura) {
+              const mask = updatePersonMask(result);
+              drawAura(auraCanvas, video, mask);
+            }
             wristTrail.update(result.landmarks[0], now);
             const wrist = result.landmarks[0]?.[RIGHT_WRIST_INDEX];
             if (wrist && wrist.visibility >= MIN_VISIBILITY) {
@@ -68,14 +123,18 @@ async function main(): Promise<void> {
             }
             const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
             updateMotionDebug(motion);
-            if (motion.event) {
+            if (visibility.energySwipe && motion.event) {
               energySwipe.spawn(motion.event);
             }
             drawTrail(trailCanvas, video, visualTrajectory.samples(), now);
-            drawPose(overlayCanvas, video, result);
+            if (visibility.skeleton) {
+              drawPose(overlayCanvas, video, result);
+            }
           });
         }
-        energySwipe.draw(effectsCanvas, video, now);
+        if (visibility.energySwipe) {
+          energySwipe.draw(effectsCanvas, video, now);
+        }
         requestAnimationFrame(tick);
       };
 
