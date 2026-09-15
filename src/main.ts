@@ -117,7 +117,12 @@ async function main(): Promise<void> {
             wristTrail.update(result.landmarks[0], now);
             const wrist = result.landmarks[0]?.[RIGHT_WRIST_INDEX];
             if (wrist && wrist.visibility >= MIN_VISIBILITY) {
-              visualTrajectory.update({ x: wrist.x, y: wrist.y, t: now });
+              visualTrajectory.update({
+                x: wrist.x,
+                y: wrist.y,
+                t: now,
+                visibility: wrist.visibility,
+              });
             } else {
               visualTrajectory.prune(now);
             }

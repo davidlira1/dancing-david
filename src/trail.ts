@@ -1,3 +1,4 @@
+import { catmullRomToBezierPath, type CubicSegment } from "./spline.ts";
 import {
   VISUAL_TRAIL_DURATION_MS,
   type VisualSample,
@@ -5,19 +6,36 @@ import {
 
 const TRAIL_COLOR = "180, 230, 255";
 const LINE_WIDTH = 4;
-
-const FADE_LAYERS = [
-  { startFrac: 0, alpha: 0.18 },
-  { startFrac: 0.4, alpha: 0.4 },
-  { startFrac: 0.65, alpha: 0.72 },
-  { startFrac: 0.84, alpha: 1 },
-] as const;
+const FADE_LAYER_COUNT = 12;
+const NEIGHBOR_PREV = 0.25;
+const NEIGHBOR_CUR = 0.5;
+const NEIGHBOR_NEXT = 0.25;
 
 type Point = {
   x: number;
   y: number;
   t: number;
 };
+
+type FadeLayer = {
+  startFrac: number;
+  alpha: number;
+};
+
+function fadeLayers(count: number): FadeLayer[] {
+  const last = Math.max(count - 1, 1);
+  const layers: FadeLayer[] = [];
+  for (let i = 0; i < count; i++) {
+    const u = i / last;
+    layers.push({
+      startFrac: Math.pow(u, 0.85) * 0.88,
+      alpha: 0.1 + 0.9 * Math.pow(u, 1.15),
+    });
+  }
+  return layers;
+}
+
+const FADE_LAYERS = fadeLayers(FADE_LAYER_COUNT);
 
 function sizeToVideo(
   canvas: HTMLCanvasElement,
@@ -44,34 +62,59 @@ function toPixels(
   }));
 }
 
-function midpoint(a: Point, b: Point): { x: number; y: number } {
-  return {
-    x: (a.x + b.x) / 2,
-    y: (a.y + b.y) / 2,
-  };
-}
-
-function addMidpointPath(ctx: CanvasRenderingContext2D, points: Point[]): void {
-  if (points.length < 2) {
-    return;
+function neighborhoodSmooth(points: Point[]): Point[] {
+  if (points.length < 3) {
+    return points;
   }
 
-  ctx.moveTo(points[0].x, points[0].y);
-  if (points.length === 2) {
-    ctx.lineTo(points[1].x, points[1].y);
-    return;
-  }
-
-  const firstMid = midpoint(points[0], points[1]);
-  ctx.lineTo(firstMid.x, firstMid.y);
+  const smoothed: Point[] = new Array(points.length);
+  smoothed[0] = points[0];
+  smoothed[points.length - 1] = points[points.length - 1];
 
   for (let i = 1; i < points.length - 1; i++) {
-    const end = midpoint(points[i], points[i + 1]);
-    ctx.quadraticCurveTo(points[i].x, points[i].y, end.x, end.y);
+    smoothed[i] = {
+      x:
+        points[i - 1].x * NEIGHBOR_PREV +
+        points[i].x * NEIGHBOR_CUR +
+        points[i + 1].x * NEIGHBOR_NEXT,
+      y:
+        points[i - 1].y * NEIGHBOR_PREV +
+        points[i].y * NEIGHBOR_CUR +
+        points[i + 1].y * NEIGHBOR_NEXT,
+      t: points[i].t,
+    };
   }
 
-  const last = points[points.length - 1];
-  ctx.lineTo(last.x, last.y);
+  return smoothed;
+}
+
+function strokeSuffix(
+  ctx: CanvasRenderingContext2D,
+  segments: CubicSegment[],
+  startFrac: number,
+): void {
+  if (segments.length === 0) {
+    return;
+  }
+
+  const start = Math.min(
+    Math.floor(segments.length * startFrac),
+    segments.length - 1,
+  );
+  ctx.beginPath();
+  ctx.moveTo(segments[start].p0.x, segments[start].p0.y);
+  for (let i = start; i < segments.length; i++) {
+    const segment = segments[i];
+    ctx.bezierCurveTo(
+      segment.c1.x,
+      segment.c1.y,
+      segment.c2.x,
+      segment.c2.y,
+      segment.p1.x,
+      segment.p1.y,
+    );
+  }
+  ctx.stroke();
 }
 
 export function drawTrail(
@@ -95,25 +138,27 @@ export function drawTrail(
     return;
   }
 
-  const points = toPixels(alive, canvas.width, canvas.height);
+  const points = neighborhoodSmooth(
+    toPixels(alive, canvas.width, canvas.height),
+  );
+  const segments = catmullRomToBezierPath(points);
+  if (segments.length === 0) {
+    return;
+  }
 
   ctx.lineWidth = LINE_WIDTH;
-  ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.shadowBlur = 4;
   ctx.shadowColor = `rgba(${TRAIL_COLOR}, 0.35)`;
 
-  for (const layer of FADE_LAYERS) {
-    const start = Math.floor(points.length * layer.startFrac);
-    const slice = points.slice(Math.min(start, points.length - 2));
-    if (slice.length < 2) {
-      continue;
-    }
-    ctx.beginPath();
-    addMidpointPath(ctx, slice);
+  const lastLayer = FADE_LAYERS.length - 1;
+  for (let i = 0; i < FADE_LAYERS.length; i++) {
+    const layer = FADE_LAYERS[i];
+    ctx.lineCap = i === 0 || i === lastLayer ? "round" : "butt";
     ctx.strokeStyle = `rgba(${TRAIL_COLOR}, ${layer.alpha})`;
-    ctx.stroke();
+    strokeSuffix(ctx, segments, layer.startFrac);
   }
 
+  ctx.lineCap = "round";
   ctx.shadowBlur = 0;
 }
