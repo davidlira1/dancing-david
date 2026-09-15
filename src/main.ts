@@ -5,7 +5,7 @@ import { createEnergySwipeEffect } from "./energy-swipe.ts";
 import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
 import { updatePersonMask } from "./segmentation.ts";
-import { drawTrail } from "./trail.ts";
+import { drawRibbon } from "./ribbon.ts";
 import { createWristTrail, MIN_VISIBILITY, RIGHT_WRIST_INDEX } from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
 import { createVisualTrajectory } from "./visual-trajectory.ts";
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
             if (visibility.energySwipe && motion.event) {
               energySwipe.spawn(motion.event);
             }
-            drawTrail(trailCanvas, video, visualTrajectory.samples(), now);
+            drawRibbon(trailCanvas, video, visualTrajectory.samples(), now);
             if (visibility.skeleton) {
               drawPose(overlayCanvas, video, result);
             }
