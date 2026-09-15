@@ -6,8 +6,9 @@ import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
 import { updatePersonMask } from "./segmentation.ts";
 import { drawTrail } from "./trail.ts";
-import { createWristTrail } from "./wrist-history.ts";
+import { createWristTrail, MIN_VISIBILITY, RIGHT_WRIST_INDEX } from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
+import { createVisualTrajectory } from "./visual-trajectory.ts";
 
 const video = document.querySelector<HTMLVideoElement>("#webcam")!;
 const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
@@ -18,6 +19,7 @@ const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const debugEl = document.querySelector<HTMLPreElement>("#motion-debug")!;
 const wristTrail = createWristTrail();
+const visualTrajectory = createVisualTrajectory();
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 let lastSwipeLabel = "—";
@@ -58,12 +60,18 @@ async function main(): Promise<void> {
             const mask = updatePersonMask(result);
             drawAura(auraCanvas, video, mask);
             wristTrail.update(result.landmarks[0], now);
+            const wrist = result.landmarks[0]?.[RIGHT_WRIST_INDEX];
+            if (wrist && wrist.visibility >= MIN_VISIBILITY) {
+              visualTrajectory.update({ x: wrist.x, y: wrist.y, t: now });
+            } else {
+              visualTrajectory.prune(now);
+            }
             const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
             updateMotionDebug(motion);
             if (motion.event) {
               energySwipe.spawn(motion.event);
             }
-            drawTrail(trailCanvas, video, wristTrail.samples(), now);
+            drawTrail(trailCanvas, video, visualTrajectory.samples(), now);
             drawPose(overlayCanvas, video, result);
           });
         }

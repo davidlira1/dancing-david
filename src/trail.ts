@@ -1,10 +1,17 @@
 import {
-  TRAIL_DURATION_MS,
-  type WristSample,
-} from "./wrist-history.ts";
+  VISUAL_TRAIL_DURATION_MS,
+  type VisualSample,
+} from "./visual-trajectory.ts";
 
 const TRAIL_COLOR = "180, 230, 255";
 const LINE_WIDTH = 4;
+
+const FADE_LAYERS = [
+  { startFrac: 0, alpha: 0.18 },
+  { startFrac: 0.4, alpha: 0.4 },
+  { startFrac: 0.65, alpha: 0.72 },
+  { startFrac: 0.84, alpha: 1 },
+] as const;
 
 type Point = {
   x: number;
@@ -26,7 +33,7 @@ function sizeToVideo(
 }
 
 function toPixels(
-  samples: readonly WristSample[],
+  samples: readonly VisualSample[],
   width: number,
   height: number,
 ): Point[] {
@@ -44,26 +51,33 @@ function midpoint(a: Point, b: Point): { x: number; y: number } {
   };
 }
 
-function alphaFor(nowMs: number, t: number): number {
-  return Math.max(0, 1 - (nowMs - t) / TRAIL_DURATION_MS);
-}
+function addMidpointPath(ctx: CanvasRenderingContext2D, points: Point[]): void {
+  if (points.length < 2) {
+    return;
+  }
 
-function strokeSegment(
-  ctx: CanvasRenderingContext2D,
-  nowMs: number,
-  t: number,
-  draw: () => void,
-): void {
-  ctx.beginPath();
-  draw();
-  ctx.strokeStyle = `rgba(${TRAIL_COLOR}, ${alphaFor(nowMs, t)})`;
-  ctx.stroke();
+  ctx.moveTo(points[0].x, points[0].y);
+  if (points.length === 2) {
+    ctx.lineTo(points[1].x, points[1].y);
+    return;
+  }
+
+  const firstMid = midpoint(points[0], points[1]);
+  ctx.lineTo(firstMid.x, firstMid.y);
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const end = midpoint(points[i], points[i + 1]);
+    ctx.quadraticCurveTo(points[i].x, points[i].y, end.x, end.y);
+  }
+
+  const last = points[points.length - 1];
+  ctx.lineTo(last.x, last.y);
 }
 
 export function drawTrail(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
-  samples: readonly WristSample[],
+  samples: readonly VisualSample[],
   nowMs: number,
 ): void {
   const ctx = canvas.getContext("2d");
@@ -74,43 +88,32 @@ export function drawTrail(
   sizeToVideo(canvas, video);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  if (samples.length < 2) {
+  const alive = samples.filter(
+    (sample) => nowMs - sample.t <= VISUAL_TRAIL_DURATION_MS,
+  );
+  if (alive.length < 2) {
     return;
   }
 
-  const points = toPixels(samples, canvas.width, canvas.height);
+  const points = toPixels(alive, canvas.width, canvas.height);
 
   ctx.lineWidth = LINE_WIDTH;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
+  ctx.shadowBlur = 4;
+  ctx.shadowColor = `rgba(${TRAIL_COLOR}, 0.35)`;
 
-  if (points.length === 2) {
-    strokeSegment(ctx, nowMs, points[1].t, () => {
-      ctx.moveTo(points[0].x, points[0].y);
-      ctx.lineTo(points[1].x, points[1].y);
-    });
-    return;
+  for (const layer of FADE_LAYERS) {
+    const start = Math.floor(points.length * layer.startFrac);
+    const slice = points.slice(Math.min(start, points.length - 2));
+    if (slice.length < 2) {
+      continue;
+    }
+    ctx.beginPath();
+    addMidpointPath(ctx, slice);
+    ctx.strokeStyle = `rgba(${TRAIL_COLOR}, ${layer.alpha})`;
+    ctx.stroke();
   }
 
-  const firstMid = midpoint(points[0], points[1]);
-  strokeSegment(ctx, nowMs, points[1].t, () => {
-    ctx.moveTo(points[0].x, points[0].y);
-    ctx.lineTo(firstMid.x, firstMid.y);
-  });
-
-  for (let i = 1; i < points.length - 1; i++) {
-    const start = midpoint(points[i - 1], points[i]);
-    const end = midpoint(points[i], points[i + 1]);
-    strokeSegment(ctx, nowMs, points[i].t, () => {
-      ctx.moveTo(start.x, start.y);
-      ctx.quadraticCurveTo(points[i].x, points[i].y, end.x, end.y);
-    });
-  }
-
-  const last = points[points.length - 1];
-  const lastMid = midpoint(points[points.length - 2], last);
-  strokeSegment(ctx, nowMs, last.t, () => {
-    ctx.moveTo(lastMid.x, lastMid.y);
-    ctx.lineTo(last.x, last.y);
-  });
+  ctx.shadowBlur = 0;
 }
