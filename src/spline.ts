@@ -45,6 +45,38 @@ function catmullRomSegment(
   };
 }
 
+export function evalCubic(segment: CubicSegment, u: number): Vec2 {
+  const t = 1 - u;
+  const t2 = t * t;
+  const u2 = u * u;
+  return {
+    x:
+      t2 * t * segment.p0.x +
+      3 * t2 * u * segment.c1.x +
+      3 * t * u2 * segment.c2.x +
+      u2 * u * segment.p1.x,
+    y:
+      t2 * t * segment.p0.y +
+      3 * t2 * u * segment.c1.y +
+      3 * t * u2 * segment.c2.y +
+      u2 * u * segment.p1.y,
+  };
+}
+
+export function evalCubicDerivative(segment: CubicSegment, u: number): Vec2 {
+  const t = 1 - u;
+  return {
+    x:
+      3 * t * t * (segment.c1.x - segment.p0.x) +
+      6 * t * u * (segment.c2.x - segment.c1.x) +
+      3 * u * u * (segment.p1.x - segment.c2.x),
+    y:
+      3 * t * t * (segment.c1.y - segment.p0.y) +
+      6 * t * u * (segment.c2.y - segment.c1.y) +
+      3 * u * u * (segment.p1.y - segment.c2.y),
+  };
+}
+
 export function catmullRomToBezierPath(
   points: readonly Vec2[],
   alpha = DEFAULT_ALPHA,
