@@ -2,9 +2,12 @@ import "./style.css";
 import { startCamera } from "./camera.ts";
 import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
+import { drawSegmentation } from "./segmentation.ts";
 
 const video = document.querySelector<HTMLVideoElement>("#webcam")!;
-const canvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
+const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
+const segmentationCanvas =
+  document.querySelector<HTMLCanvasElement>("#segmentation")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 
@@ -29,8 +32,10 @@ async function main(): Promise<void> {
       const tick = (): void => {
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
-          const result = detectPose(landmarker, video, performance.now());
-          drawPose(canvas, video, result);
+          detectPose(landmarker, video, performance.now(), (result) => {
+            drawSegmentation(segmentationCanvas, video, result);
+            drawPose(overlayCanvas, video, result);
+          });
         }
         requestAnimationFrame(tick);
       };

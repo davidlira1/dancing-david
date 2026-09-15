@@ -37,6 +37,7 @@ h1 {
 }
 
 #webcam,
+#segmentation,
 #overlay {
   display: block;
 }
@@ -46,11 +47,20 @@ h1 {
   height: auto;
 }
 
+#segmentation,
 #overlay {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+}
+
+#segmentation {
+  z-index: 1;
+}
+
+#overlay {
+  z-index: 2;
 }
 
 #start {
