@@ -14,7 +14,10 @@ export type WristSwipeEvent = {
   type: "WRIST_SWIPE";
   direction: SwipeDirection;
   speed: number;
+  /** Screen/viewer space: +x is RIGHT, +y is DOWN. */
   velocity: { x: number; y: number };
+  /** Newest raw wrist sample in normalized image coordinates. */
+  origin: { x: number; y: number };
   timestamp: number;
 };
 
@@ -84,6 +87,7 @@ export function createMotionAnalyzer() {
           direction,
           speed,
           velocity: { x: vx, y: vy },
+          origin: { x: newest.x, y: newest.y },
           timestamp: nowMs,
         };
       }

@@ -1,6 +1,7 @@
 import "./style.css";
 import { drawAura } from "./aura.ts";
 import { startCamera } from "./camera.ts";
+import { createEnergySwipeEffect } from "./energy-swipe.ts";
 import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
 import { updatePersonMask } from "./segmentation.ts";
@@ -12,11 +13,13 @@ const video = document.querySelector<HTMLVideoElement>("#webcam")!;
 const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
 const auraCanvas = document.querySelector<HTMLCanvasElement>("#aura")!;
 const trailCanvas = document.querySelector<HTMLCanvasElement>("#trail")!;
+const effectsCanvas = document.querySelector<HTMLCanvasElement>("#effects")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const debugEl = document.querySelector<HTMLPreElement>("#motion-debug")!;
 const wristTrail = createWristTrail();
 const motionAnalyzer = createMotionAnalyzer();
+const energySwipe = createEnergySwipeEffect();
 let lastSwipeLabel = "—";
 
 function setStatus(message: string): void {
@@ -48,19 +51,23 @@ async function main(): Promise<void> {
 
       let lastVideoTime = -1;
       const tick = (): void => {
+        const now = performance.now();
         if (video.currentTime !== lastVideoTime) {
           lastVideoTime = video.currentTime;
-          detectPose(landmarker, video, performance.now(), (result) => {
-            const now = performance.now();
+          detectPose(landmarker, video, now, (result) => {
             const mask = updatePersonMask(result);
             drawAura(auraCanvas, video, mask);
             wristTrail.update(result.landmarks[0], now);
             const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
             updateMotionDebug(motion);
+            if (motion.event) {
+              energySwipe.spawn(motion.event);
+            }
             drawTrail(trailCanvas, video, wristTrail.samples(), now);
             drawPose(overlayCanvas, video, result);
           });
         }
+        energySwipe.draw(effectsCanvas, video, now);
         requestAnimationFrame(tick);
       };
 

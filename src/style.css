@@ -39,6 +39,7 @@ h1 {
 #webcam,
 #aura,
 #trail,
+#effects,
 #overlay {
   display: block;
 }
@@ -50,6 +51,7 @@ h1 {
 
 #aura,
 #trail,
+#effects,
 #overlay {
   position: absolute;
   inset: 0;
@@ -65,8 +67,12 @@ h1 {
   z-index: 2;
 }
 
-#overlay {
+#effects {
   z-index: 3;
+}
+
+#overlay {
+  z-index: 4;
 }
 
 #start {
