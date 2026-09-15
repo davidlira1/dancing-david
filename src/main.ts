@@ -11,8 +11,9 @@ import {
   drawTrackingDebug,
   formatTrackingDebug,
 } from "./tracking-debug.ts";
+import { createVfxControls } from "./vfx-controls.ts";
 import { createRibbonRenderer } from "./webgl/ribbon-renderer.ts";
-import { DEFAULT_SCHEME, RIBBON_SCHEMES } from "./webgl/visual.ts";
+import { createRibbonVfxConfig } from "./webgl/visual.ts";
 import {
   createWristTrail,
   LEFT_WRIST_INDEX,
@@ -36,6 +37,7 @@ const visualLeft = createVisualTrajectory();
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
+const vfxConfig = createRibbonVfxConfig();
 let lastSwipeLabel = "—";
 let lastMotion: MotionSnapshot | null = null;
 
@@ -53,31 +55,13 @@ const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")
 const trackingToggle =
   document.querySelector<HTMLButtonElement>("#toggle-tracking")!;
 
-function syncSchemeButtons(activeId: string): void {
-  for (const scheme of RIBBON_SCHEMES) {
-    const button = document.querySelector<HTMLButtonElement>(
-      `#scheme-${scheme.id}`,
-    );
-    if (!button) {
-      continue;
-    }
-    button.setAttribute(
-      "aria-pressed",
-      scheme.id === activeId ? "true" : "false",
-    );
-  }
-}
-
-for (const scheme of RIBBON_SCHEMES) {
-  const button = document.querySelector<HTMLButtonElement>(
-    `#scheme-${scheme.id}`,
-  );
-  button?.addEventListener("click", () => {
-    ribbonRenderer?.setScheme(scheme);
-    syncSchemeButtons(scheme.id);
-  });
-}
-syncSchemeButtons(DEFAULT_SCHEME.id);
+createVfxControls({
+  config: vfxConfig,
+  onChange: () => {
+    visualRight.setDurationMs(vfxConfig.trailDurationMs);
+    visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+  },
+});
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -232,6 +216,8 @@ async function main(): Promise<void> {
           });
         }
 
+        visualRight.setDurationMs(vfxConfig.trailDurationMs);
+        visualLeft.setDurationMs(vfxConfig.trailDurationMs);
         if (ribbonRenderer && video.videoWidth > 0 && video.videoHeight > 0) {
           ribbonRenderer.resize(
             video.videoWidth,
@@ -245,15 +231,18 @@ async function main(): Promise<void> {
                 now,
                 video.videoWidth,
                 video.videoHeight,
+                vfxConfig.trailDurationMs,
               ),
               left: buildTrailGeometry(
                 visualLeft.samples(),
                 now,
                 video.videoWidth,
                 video.videoHeight,
+                vfxConfig.trailDurationMs,
               ),
             },
             now,
+            vfxConfig,
           );
         }
 

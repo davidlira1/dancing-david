@@ -1,6 +1,5 @@
 import { flattenCubic } from "../spline.ts";
 import type { TimedSegment } from "../trail.ts";
-import { VISUAL_TRAIL_DURATION_MS } from "../visual-trajectory.ts";
 import { createBloomRenderer, type BloomRenderer } from "./bloom-renderer.ts";
 import {
   disposeFrameTarget,
@@ -13,18 +12,14 @@ import {
   RIBBON_VERTEX_SHADER,
 } from "./shaders.ts";
 import {
-  CORE_WIDTH,
   CURVE_FLATNESS_PX,
-  DEFAULT_SCHEME,
-  EDGE_SOFTNESS,
-  INTENSITY,
+  DEFAULT_RIBBON_VFX_CONFIG,
+  hexToRgb,
   MAX_RIBBON_SAMPLES,
   MAX_SUBDIVISION_DEPTH,
-  MIN_WIDTH_SCALE,
-  RIBBON_WIDTH,
   TAIL_FADE_END,
   TARGET_SAMPLE_SPACING_PX,
-  type RibbonScheme,
+  type RibbonVfxConfig,
 } from "./visual.ts";
 
 const TANGENT_EPS = 1e-6;
@@ -53,8 +48,7 @@ export type RibbonTrails = {
 
 export type RibbonRenderer = {
   resize(videoWidth: number, videoHeight: number, dpr: number): void;
-  setScheme(scheme: RibbonScheme): void;
-  render(trails: RibbonTrails, nowMs: number): void;
+  render(trails: RibbonTrails, nowMs: number, vfx: RibbonVfxConfig): void;
   lastHead(): { x: number; y: number } | null;
   stats(): RibbonStats;
   dispose(): void;
@@ -227,9 +221,11 @@ function assignNeighborNormals(samples: CenterSample[]): void {
 export function sampleRibbonCenterline(
   segments: TimedSegment[],
   nowMs: number,
+  trailDurationMs = DEFAULT_RIBBON_VFX_CONFIG.trailDurationMs,
 ): CenterSample[] {
   const polyline = resamplePolyline(flattenTrail(segments));
   const samples: CenterSample[] = new Array(polyline.length);
+  const duration = Math.max(1, trailDurationMs);
   for (let i = 0; i < polyline.length; i++) {
     const point = polyline[i];
     samples[i] = {
@@ -237,7 +233,7 @@ export function sampleRibbonCenterline(
       y: point.y,
       nx: 0,
       ny: 1,
-      life: 1 - clamp01((nowMs - point.t) / VISUAL_TRAIL_DURATION_MS),
+      life: 1 - clamp01((nowMs - point.t) / duration),
     };
   }
 
@@ -382,7 +378,7 @@ export function createRibbonRenderer(
   let ribbonTarget: FrameTarget | null = null;
   let lastSampleCount = 0;
   let lastVertexCount = 0;
-  let scheme: RibbonScheme = DEFAULT_SCHEME;
+  let activeVfx: RibbonVfxConfig = DEFAULT_RIBBON_VFX_CONFIG;
 
   gpu.disable(gpu.DEPTH_TEST);
   gpu.enable(gpu.BLEND);
@@ -390,18 +386,26 @@ export function createRibbonRenderer(
   gpu.clearColor(0, 0, 0, 0);
 
   function drawRibbonMesh(vertexCount: number): void {
+    const core = hexToRgb(activeVfx.coreColor);
+    const body = hexToRgb(activeVfx.bodyColor);
+    const edge = hexToRgb(activeVfx.edgeColor);
+    const mid: [number, number, number] = [
+      (body[0] + edge[0]) * 0.5,
+      (body[1] + edge[1]) * 0.5,
+      (body[2] + edge[2]) * 0.5,
+    ];
     gpu.useProgram(program);
     gpu.uniform2f(uResolution, videoWidth, videoHeight);
-    gpu.uniform1f(uMaxWidth, RIBBON_WIDTH);
-    gpu.uniform1f(uMinWidthScale, MIN_WIDTH_SCALE);
-    gpu.uniform1f(uCoreWidth, CORE_WIDTH);
-    gpu.uniform1f(uEdgeSoftness, EDGE_SOFTNESS);
+    gpu.uniform1f(uMaxWidth, activeVfx.ribbonWidth);
+    gpu.uniform1f(uMinWidthScale, activeVfx.tailWidthScale);
+    gpu.uniform1f(uCoreWidth, activeVfx.coreWidth);
+    gpu.uniform1f(uEdgeSoftness, activeVfx.edgeSoftness);
     gpu.uniform1f(uTailFadeEnd, TAIL_FADE_END);
-    gpu.uniform1f(uIntensity, INTENSITY);
-    gpu.uniform3f(uCoreColor, scheme.core[0], scheme.core[1], scheme.core[2]);
-    gpu.uniform3f(uCyan, scheme.inner[0], scheme.inner[1], scheme.inner[2]);
-    gpu.uniform3f(uBlue, scheme.mid[0], scheme.mid[1], scheme.mid[2]);
-    gpu.uniform3f(uViolet, scheme.outer[0], scheme.outer[1], scheme.outer[2]);
+    gpu.uniform1f(uIntensity, activeVfx.ribbonIntensity);
+    gpu.uniform3f(uCoreColor, core[0], core[1], core[2]);
+    gpu.uniform3f(uCyan, body[0], body[1], body[2]);
+    gpu.uniform3f(uBlue, mid[0], mid[1], mid[2]);
+    gpu.uniform3f(uViolet, edge[0], edge[1], edge[2]);
     gpu.bindVertexArray(vao);
     gpu.drawArrays(gpu.TRIANGLE_STRIP, 0, vertexCount);
     gpu.bindVertexArray(null);
@@ -424,7 +428,11 @@ export function createRibbonRenderer(
       return;
     }
 
-    const samples = sampleRibbonCenterline(segments, nowMs);
+    const samples = sampleRibbonCenterline(
+      segments,
+      nowMs,
+      activeVfx.trailDurationMs,
+    );
     lastSampleCount += samples.length;
     if (samples.length < 2) {
       if (isRight) {
@@ -474,16 +482,12 @@ export function createRibbonRenderer(
       bloom.resize(canvas.width, canvas.height);
     },
 
-    setScheme(next: RibbonScheme): void {
-      scheme = next;
-      bloom.setScheme(next);
-    },
-
-    render(trails: RibbonTrails, nowMs: number): void {
+    render(trails: RibbonTrails, nowMs: number, vfx: RibbonVfxConfig): void {
       if (!ribbonTarget) {
         return;
       }
 
+      activeVfx = vfx;
       lastSampleCount = 0;
       lastVertexCount = 0;
       gpu.bindFramebuffer(gpu.FRAMEBUFFER, ribbonTarget.framebuffer);
@@ -495,10 +499,10 @@ export function createRibbonRenderer(
       drawTrail(trails.right, nowMs, true);
       drawTrail(trails.left, nowMs, false);
 
-      const bloomTexture = bloom.blur(ribbonTarget.texture);
+      const bloomTexture = bloom.blur(ribbonTarget.texture, vfx.bloomRadius);
       bindDefaultFramebuffer();
       gpu.clear(gpu.COLOR_BUFFER_BIT);
-      bloom.composite(ribbonTarget.texture, bloomTexture);
+      bloom.composite(ribbonTarget.texture, bloomTexture, vfx);
     },
 
     lastHead(): { x: number; y: number } | null {

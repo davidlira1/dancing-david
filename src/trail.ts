@@ -62,9 +62,10 @@ export function buildTrailGeometry(
   nowMs: number,
   width: number,
   height: number,
+  durationMs = VISUAL_TRAIL_DURATION_MS,
 ): TimedSegment[] {
   const alive = samples.filter(
-    (sample) => nowMs - sample.t <= VISUAL_TRAIL_DURATION_MS,
+    (sample) => nowMs - sample.t <= durationMs,
   );
   if (alive.length < 2) {
     return [];

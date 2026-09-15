@@ -60,3 +60,128 @@ export const RIBBON_SCHEMES: readonly RibbonScheme[] = [
 ];
 
 export const DEFAULT_SCHEME: RibbonScheme = RIBBON_SCHEMES[0];
+
+export type RibbonVfxConfig = {
+  ribbonWidth: number;
+  tailWidthScale: number;
+  coreWidth: number;
+  edgeSoftness: number;
+  ribbonIntensity: number;
+  bloomRadius: number;
+  bloomIntensity: number;
+  trailDurationMs: number;
+  coreColor: string;
+  bodyColor: string;
+  edgeColor: string;
+  bloomColor: string;
+};
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function channelToHex(value: number): string {
+  const byte = Math.round(clamp01(value) * 255);
+  return byte.toString(16).padStart(2, "0");
+}
+
+export function rgbToHex(
+  rgb: readonly [number, number, number],
+): string {
+  return `#${channelToHex(rgb[0])}${channelToHex(rgb[1])}${channelToHex(rgb[2])}`;
+}
+
+export function hexToRgb(hex: string): [number, number, number] {
+  const raw = hex.trim().replace("#", "");
+  const full =
+    raw.length === 3
+      ? `${raw[0]}${raw[0]}${raw[1]}${raw[1]}${raw[2]}${raw[2]}`
+      : raw;
+  const value = Number.parseInt(full, 16);
+  if (!Number.isFinite(value) || full.length !== 6) {
+    return [1, 1, 1];
+  }
+  return [
+    ((value >> 16) & 255) / 255,
+    ((value >> 8) & 255) / 255,
+    (value & 255) / 255,
+  ];
+}
+
+export function cloneRibbonVfxConfig(
+  config: RibbonVfxConfig,
+): RibbonVfxConfig {
+  return { ...config };
+}
+
+export const DEFAULT_RIBBON_VFX_CONFIG: RibbonVfxConfig = {
+  ribbonWidth: RIBBON_WIDTH,
+  tailWidthScale: MIN_WIDTH_SCALE,
+  coreWidth: CORE_WIDTH,
+  edgeSoftness: EDGE_SOFTNESS,
+  ribbonIntensity: INTENSITY,
+  bloomRadius: BLOOM_RADIUS,
+  bloomIntensity: BLOOM_INTENSITY,
+  trailDurationMs: 1900,
+  coreColor: rgbToHex(DEFAULT_SCHEME.core),
+  bodyColor: rgbToHex(DEFAULT_SCHEME.inner),
+  edgeColor: rgbToHex(DEFAULT_SCHEME.outer),
+  bloomColor: rgbToHex(DEFAULT_SCHEME.bloomTint),
+};
+
+export function createRibbonVfxConfig(): RibbonVfxConfig {
+  return cloneRibbonVfxConfig(DEFAULT_RIBBON_VFX_CONFIG);
+}
+
+export function applySchemeToVfx(
+  config: RibbonVfxConfig,
+  scheme: RibbonScheme,
+): void {
+  config.coreColor = rgbToHex(scheme.core);
+  config.bodyColor = rgbToHex(scheme.inner);
+  config.edgeColor = rgbToHex(scheme.outer);
+  config.bloomColor = rgbToHex(scheme.bloomTint);
+}
+
+export function assignRibbonVfxConfig(
+  target: RibbonVfxConfig,
+  source: RibbonVfxConfig,
+): void {
+  target.ribbonWidth = source.ribbonWidth;
+  target.tailWidthScale = source.tailWidthScale;
+  target.coreWidth = source.coreWidth;
+  target.edgeSoftness = source.edgeSoftness;
+  target.ribbonIntensity = source.ribbonIntensity;
+  target.bloomRadius = source.bloomRadius;
+  target.bloomIntensity = source.bloomIntensity;
+  target.trailDurationMs = source.trailDurationMs;
+  target.coreColor = source.coreColor;
+  target.bodyColor = source.bodyColor;
+  target.edgeColor = source.edgeColor;
+  target.bloomColor = source.bloomColor;
+}
+
+export const THIN_RIBBON_VFX_PRESET: RibbonVfxConfig = {
+  ...DEFAULT_RIBBON_VFX_CONFIG,
+  ribbonWidth: 12,
+  tailWidthScale: 0.5,
+  coreWidth: 0.08,
+  bloomRadius: 1.5,
+};
+
+export const MEDIUM_RIBBON_VFX_PRESET: RibbonVfxConfig =
+  cloneRibbonVfxConfig(DEFAULT_RIBBON_VFX_CONFIG);
+
+export const THICK_RIBBON_VFX_PRESET: RibbonVfxConfig = {
+  ...DEFAULT_RIBBON_VFX_CONFIG,
+  ribbonWidth: 44,
+  tailWidthScale: 0.85,
+  coreWidth: 0.16,
+  bloomRadius: 4,
+};
+
+export const RIBBON_VFX_PRESETS = {
+  thin: THIN_RIBBON_VFX_PRESET,
+  medium: MEDIUM_RIBBON_VFX_PRESET,
+  thick: THICK_RIBBON_VFX_PRESET,
+} as const;

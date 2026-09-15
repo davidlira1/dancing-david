@@ -23,8 +23,12 @@ export type JumpDebug = {
   allowed: number;
 };
 
-function prune(points: VisualSample[], timestampMs: number): void {
-  const cutoff = timestampMs - VISUAL_TRAIL_DURATION_MS;
+function prune(
+  points: VisualSample[],
+  timestampMs: number,
+  durationMs: number,
+): void {
+  const cutoff = timestampMs - durationMs;
   while (points.length > 0 && points[0].t < cutoff) {
     points.shift();
   }
@@ -84,6 +88,7 @@ export function createVisualTrajectory() {
   const points: VisualSample[] = [];
   let smoothed: { x: number; y: number; t: number } | null = null;
   let recentRawSpeed = 0;
+  let durationMs = VISUAL_TRAIL_DURATION_MS;
   let jumpDebug: JumpDebug = { clamped: false, requested: 0, allowed: 0 };
 
   function pushFiltered(point: VisualSample): void {
@@ -110,7 +115,7 @@ export function createVisualTrajectory() {
 
   return {
     update(point: VisualSample): void {
-      prune(points, point.t);
+      prune(points, point.t, durationMs);
 
       if (!smoothed) {
         smoothed = { x: point.x, y: point.y, t: point.t };
@@ -153,7 +158,11 @@ export function createVisualTrajectory() {
     },
 
     prune(timestampMs: number): void {
-      prune(points, timestampMs);
+      prune(points, timestampMs, durationMs);
+    },
+
+    setDurationMs(ms: number): void {
+      durationMs = Math.max(1, ms);
     },
 
     samples(): readonly VisualSample[] {

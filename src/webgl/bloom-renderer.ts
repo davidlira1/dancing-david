@@ -10,21 +10,22 @@ import {
   FULLSCREEN_VERTEX_SHADER,
 } from "./shaders.ts";
 import {
-  BLOOM_INTENSITY,
-  BLOOM_RADIUS,
   BLOOM_SCALE,
   BLOOM_THRESHOLD,
-  DEFAULT_SCHEME,
-  type RibbonScheme,
+  hexToRgb,
+  type RibbonVfxConfig,
 } from "./visual.ts";
 
 export type BloomRenderer = {
   resize(fullWidth: number, fullHeight: number): void;
   size(): { width: number; height: number };
-  setScheme(scheme: RibbonScheme): void;
   /** Blur `source` into the internal ping-pong pair. Returns the bloom texture. */
-  blur(source: WebGLTexture): WebGLTexture;
-  composite(ribbonTexture: WebGLTexture, bloomTexture: WebGLTexture): void;
+  blur(source: WebGLTexture, radius: number): WebGLTexture;
+  composite(
+    ribbonTexture: WebGLTexture,
+    bloomTexture: WebGLTexture,
+    vfx: RibbonVfxConfig,
+  ): void;
   dispose(): void;
 };
 
@@ -82,7 +83,6 @@ export function createBloomRenderer(
   let pong: FrameTarget | null = null;
   let bloomWidth = 1;
   let bloomHeight = 1;
-  let bloomTint = DEFAULT_SCHEME.bloomTint;
 
   function drawFullscreen(): void {
     gl.bindVertexArray(vao);
@@ -100,11 +100,16 @@ export function createBloomRenderer(
    * One separable Gaussian into `ping` then `pong`.
    * A second, lower-resolution scale can call this with other targets later.
    */
-  function separableBlur(source: WebGLTexture, destA: FrameTarget, destB: FrameTarget): void {
+  function separableBlur(
+    source: WebGLTexture,
+    destA: FrameTarget,
+    destB: FrameTarget,
+    radius: number,
+  ): void {
     gl.disable(gl.BLEND);
     gl.useProgram(blurProgram);
     gl.uniform1i(uSource, 0);
-    gl.uniform1f(uRadius, BLOOM_RADIUS);
+    gl.uniform1f(uRadius, radius);
     gl.uniform1f(uThreshold, BLOOM_THRESHOLD);
     gl.uniform2f(uTexel, 1 / destA.width, 1 / destA.height);
 
@@ -134,19 +139,20 @@ export function createBloomRenderer(
       return { width: bloomWidth, height: bloomHeight };
     },
 
-    setScheme(scheme: RibbonScheme): void {
-      bloomTint = scheme.bloomTint;
-    },
-
-    blur(source: WebGLTexture): WebGLTexture {
+    blur(source: WebGLTexture, radius: number): WebGLTexture {
       if (!ping || !pong) {
         throw new Error("Bloom targets missing; call resize first.");
       }
-      separableBlur(source, ping, pong);
+      separableBlur(source, ping, pong, radius);
       return pong.texture;
     },
 
-    composite(ribbonTexture: WebGLTexture, bloomTexture: WebGLTexture): void {
+    composite(
+      ribbonTexture: WebGLTexture,
+      bloomTexture: WebGLTexture,
+      vfx: RibbonVfxConfig,
+    ): void {
+      const tint = hexToRgb(vfx.bloomColor);
       gl.disable(gl.BLEND);
       gl.useProgram(compositeProgram);
       gl.activeTexture(gl.TEXTURE0);
@@ -155,8 +161,8 @@ export function createBloomRenderer(
       gl.bindTexture(gl.TEXTURE_2D, bloomTexture);
       gl.uniform1i(uRibbon, 0);
       gl.uniform1i(uBloom, 1);
-      gl.uniform1f(uIntensity, BLOOM_INTENSITY);
-      gl.uniform3f(uTint, bloomTint[0], bloomTint[1], bloomTint[2]);
+      gl.uniform1f(uIntensity, vfx.bloomIntensity);
+      gl.uniform3f(uTint, tint[0], tint[1], tint[2]);
       drawFullscreen();
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, null);

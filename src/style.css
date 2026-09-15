@@ -12,9 +12,11 @@ body {
 main {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 16px;
-  padding: 24px 16px 40px;
+  padding: 24px 16px 24px;
+  max-width: 1440px;
+  margin: 0 auto;
 }
 
 h1 {
@@ -28,9 +30,17 @@ h1 {
   color: #b4b4be;
 }
 
+.workspace {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+}
+
 .stage {
   position: relative;
-  width: min(960px, 100%);
+  flex: 1 1 auto;
+  min-width: 0;
   background: #000;
   overflow: hidden;
   transform: scaleX(-1);
@@ -85,6 +95,7 @@ h1 {
   background: #5b5cff;
   color: #fff;
   cursor: pointer;
+  width: 100%;
 }
 
 #start:disabled {
@@ -99,11 +110,23 @@ h1 {
   min-width: 16ch;
 }
 
+.controls {
+  flex: 0 0 320px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  position: sticky;
+  top: 16px;
+}
+
 #layer-toggles,
 #color-schemes {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
 }
 
@@ -122,4 +145,113 @@ h1 {
 #color-schemes button[aria-pressed="false"] {
   background: #2a2b33;
   color: #8b8b96;
+}
+
+#ribbon-vfx {
+  width: 100%;
+  padding: 12px 14px 14px;
+  border-radius: 8px;
+  background: #1a1b22;
+}
+
+#ribbon-vfx header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#ribbon-vfx h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+#ribbon-vfx-toggle {
+  font: inherit;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: #3d3f6b;
+  color: #fff;
+  cursor: pointer;
+}
+
+#ribbon-vfx.collapsed header {
+  margin-bottom: 0;
+}
+
+#ribbon-vfx-body {
+  display: grid;
+  gap: 8px;
+}
+
+#ribbon-vfx-body[hidden] {
+  display: none;
+}
+
+.vfx-section {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8b8b96;
+}
+
+#ribbon-vfx label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.vfx-row {
+  display: grid;
+  grid-template-columns: 1fr 7ch;
+  gap: 8px;
+  align-items: center;
+}
+
+#ribbon-vfx input[type="range"] {
+  width: 100%;
+}
+
+#ribbon-vfx input[type="color"] {
+  width: 48px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.vfx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.vfx-actions button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #3d3f6b;
+  color: #fff;
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    flex-direction: column;
+  }
+
+  .controls {
+    width: 100%;
+    flex-basis: auto;
+    max-height: none;
+    position: static;
+  }
 }

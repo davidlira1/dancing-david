@@ -10,28 +10,122 @@
     <main>
       <h1>Dancing David</h1>
       <p id="status">Loading pose model…</p>
-      <div class="stage">
-        <video id="webcam" playsinline muted></video>
-        <canvas id="aura"></canvas>
-        <canvas id="ribbon-gl"></canvas>
-        <canvas id="effects"></canvas>
-        <canvas id="overlay"></canvas>
-      </div>
-      <pre id="motion-debug">Speed: 0.00
+      <div class="workspace">
+        <div class="stage">
+          <video id="webcam" playsinline muted></video>
+          <canvas id="aura"></canvas>
+          <canvas id="ribbon-gl"></canvas>
+          <canvas id="effects"></canvas>
+          <canvas id="overlay"></canvas>
+        </div>
+        <aside class="controls">
+          <button id="start" type="button" disabled>Start camera</button>
+          <pre id="motion-debug">Speed: 0.00
 Direction: NONE
 Last event: —</pre>
-      <div id="layer-toggles">
-        <button type="button" id="toggle-skeleton" aria-pressed="true">Skeleton: ON</button>
-        <button type="button" id="toggle-aura" aria-pressed="true">Aura: ON</button>
-        <button type="button" id="toggle-energy" aria-pressed="true">Energy Swipe: ON</button>
-        <button type="button" id="toggle-tracking" aria-pressed="false">DEBUG TRACKING: OFF</button>
+          <div id="layer-toggles">
+            <button type="button" id="toggle-skeleton" aria-pressed="true">Skeleton: ON</button>
+            <button type="button" id="toggle-aura" aria-pressed="true">Aura: ON</button>
+            <button type="button" id="toggle-energy" aria-pressed="true">Energy Swipe: ON</button>
+            <button type="button" id="toggle-tracking" aria-pressed="false">DEBUG TRACKING: OFF</button>
+          </div>
+          <div id="color-schemes">
+            <button type="button" id="scheme-electric" aria-pressed="true">Electric</button>
+            <button type="button" id="scheme-green" aria-pressed="false">Neon Green</button>
+            <button type="button" id="scheme-magenta" aria-pressed="false">Magenta</button>
+          </div>
+          <section id="ribbon-vfx">
+            <header>
+              <h2>Ribbon VFX</h2>
+              <button type="button" id="ribbon-vfx-toggle" aria-expanded="true" aria-controls="ribbon-vfx-body">−</button>
+            </header>
+            <div id="ribbon-vfx-body">
+              <p class="vfx-section">Ribbon</p>
+              <label>
+                <span>Ribbon Width</span>
+                <span class="vfx-row">
+                  <input id="vfx-ribbonWidth" type="range" min="4" max="50" step="1" />
+                  <span id="vfx-ribbonWidth-value">32 px</span>
+                </span>
+              </label>
+              <label>
+                <span>Tail Width</span>
+                <span class="vfx-row">
+                  <input id="vfx-tailWidthScale" type="range" min="0.04" max="1" step="0.01" />
+                  <span id="vfx-tailWidthScale-value">0.04</span>
+                </span>
+              </label>
+              <label>
+                <span>Core Width</span>
+                <span class="vfx-row">
+                  <input id="vfx-coreWidth" type="range" min="0.02" max="0.50" step="0.01" />
+                  <span id="vfx-coreWidth-value">0.11</span>
+                </span>
+              </label>
+              <label>
+                <span>Edge Softness</span>
+                <span class="vfx-row">
+                  <input id="vfx-edgeSoftness" type="range" min="0.02" max="0.50" step="0.01" />
+                  <span id="vfx-edgeSoftness-value">0.28</span>
+                </span>
+              </label>
+              <label>
+                <span>Ribbon Intensity</span>
+                <span class="vfx-row">
+                  <input id="vfx-ribbonIntensity" type="range" min="0.1" max="3" step="0.05" />
+                  <span id="vfx-ribbonIntensity-value">1.45</span>
+                </span>
+              </label>
+              <p class="vfx-section">Bloom</p>
+              <label>
+                <span>Bloom Radius</span>
+                <span class="vfx-row">
+                  <input id="vfx-bloomRadius" type="range" min="1" max="30" step="0.1" />
+                  <span id="vfx-bloomRadius-value">2.4</span>
+                </span>
+              </label>
+              <label>
+                <span>Bloom Intensity</span>
+                <span class="vfx-row">
+                  <input id="vfx-bloomIntensity" type="range" min="0" max="3" step="0.05" />
+                  <span id="vfx-bloomIntensity-value">1.05</span>
+                </span>
+              </label>
+              <p class="vfx-section">Trail</p>
+              <label>
+                <span>Trail Duration</span>
+                <span class="vfx-row">
+                  <input id="vfx-trailDurationMs" type="range" min="500" max="5000" step="100" />
+                  <span id="vfx-trailDurationMs-value">1900 ms</span>
+                </span>
+              </label>
+              <p class="vfx-section">Color</p>
+              <label>
+                <span>Core Color</span>
+                <input id="vfx-coreColor" type="color" value="#f2fcff" />
+              </label>
+              <label>
+                <span>Body Color</span>
+                <input id="vfx-bodyColor" type="color" value="#38e6ff" />
+              </label>
+              <label>
+                <span>Edge Color</span>
+                <input id="vfx-edgeColor" type="color" value="#9e33ff" />
+              </label>
+              <label>
+                <span>Bloom Color</span>
+                <input id="vfx-bloomColor" type="color" value="#bf59ff" />
+              </label>
+              <div class="vfx-actions">
+                <button type="button" id="vfx-preset-thin">Thin</button>
+                <button type="button" id="vfx-preset-medium">Medium</button>
+                <button type="button" id="vfx-preset-thick">Thick</button>
+                <button type="button" id="vfx-reset">Reset Defaults</button>
+              </div>
+            </div>
+          </section>
+        </aside>
       </div>
-      <div id="color-schemes">
-        <button type="button" id="scheme-electric" aria-pressed="true">Electric</button>
-        <button type="button" id="scheme-green" aria-pressed="false">Neon Green</button>
-        <button type="button" id="scheme-magenta" aria-pressed="false">Magenta</button>
-      </div>
-      <button id="start" type="button" disabled>Start camera</button>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>
