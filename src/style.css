@@ -83,3 +83,10 @@ h1 {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+#motion-debug {
+  margin: 0;
+  font: 14px/1.45 ui-monospace, Consolas, monospace;
+  color: #c8c8d0;
+  min-width: 16ch;
+}

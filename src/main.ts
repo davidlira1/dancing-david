@@ -6,6 +6,7 @@ import { createPoseLandmarker, detectPose } from "./pose.ts";
 import { updatePersonMask } from "./segmentation.ts";
 import { drawTrail } from "./trail.ts";
 import { createWristTrail } from "./wrist-history.ts";
+import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
 
 const video = document.querySelector<HTMLVideoElement>("#webcam")!;
 const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
@@ -13,10 +14,23 @@ const auraCanvas = document.querySelector<HTMLCanvasElement>("#aura")!;
 const trailCanvas = document.querySelector<HTMLCanvasElement>("#trail")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
+const debugEl = document.querySelector<HTMLPreElement>("#motion-debug")!;
 const wristTrail = createWristTrail();
+const motionAnalyzer = createMotionAnalyzer();
+let lastSwipeLabel = "—";
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
+}
+
+function updateMotionDebug(motion: MotionSnapshot): void {
+  if (motion.event) {
+    lastSwipeLabel = `SWIPE ${motion.event.direction}`;
+  }
+  debugEl.textContent =
+    `Speed: ${motion.speed.toFixed(2)}\n` +
+    `Direction: ${motion.direction}\n` +
+    `Last event: ${lastSwipeLabel}`;
 }
 
 async function main(): Promise<void> {
@@ -41,6 +55,8 @@ async function main(): Promise<void> {
             const mask = updatePersonMask(result);
             drawAura(auraCanvas, video, mask);
             wristTrail.update(result.landmarks[0], now);
+            const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
+            updateMotionDebug(motion);
             drawTrail(trailCanvas, video, wristTrail.samples(), now);
             drawPose(overlayCanvas, video, result);
           });
