@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dancing David</title>
+  </head>
+  <body>
+    <main>
+      <h1>Dancing David</h1>
+      <p id="status">Loading pose model…</p>
+      <div class="stage">
+        <video id="webcam" playsinline muted></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <button id="start" type="button" disabled>Start camera</button>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
