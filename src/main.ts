@@ -5,7 +5,8 @@ import { createEnergySwipeEffect } from "./energy-swipe.ts";
 import { drawPose } from "./overlay.ts";
 import { createPoseLandmarker, detectPose } from "./pose.ts";
 import { updatePersonMask } from "./segmentation.ts";
-import { drawRibbon } from "./ribbon.ts";
+import { buildTrailGeometry } from "./trail.ts";
+import { createRibbonRenderer } from "./webgl/ribbon-renderer.ts";
 import { createWristTrail, MIN_VISIBILITY, RIGHT_WRIST_INDEX } from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
 import { createVisualTrajectory } from "./visual-trajectory.ts";
@@ -13,7 +14,7 @@ import { createVisualTrajectory } from "./visual-trajectory.ts";
 const video = document.querySelector<HTMLVideoElement>("#webcam")!;
 const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
 const auraCanvas = document.querySelector<HTMLCanvasElement>("#aura")!;
-const trailCanvas = document.querySelector<HTMLCanvasElement>("#trail")!;
+const ribbonCanvas = document.querySelector<HTMLCanvasElement>("#ribbon-gl")!;
 const effectsCanvas = document.querySelector<HTMLCanvasElement>("#effects")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
@@ -22,6 +23,7 @@ const wristTrail = createWristTrail();
 const visualTrajectory = createVisualTrajectory();
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
+const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
 let lastSwipeLabel = "—";
 
 const visibility = {
@@ -102,7 +104,11 @@ async function main(): Promise<void> {
     try {
       setStatus("Starting camera…");
       await startCamera(video);
-      setStatus("Camera running.");
+      setStatus(
+        ribbonRenderer
+          ? "Camera running."
+          : "Camera running. WebGL2 is unavailable, so the neon ribbon is off.",
+      );
 
       let lastVideoTime = -1;
       const tick = (): void => {
@@ -131,7 +137,22 @@ async function main(): Promise<void> {
             if (visibility.energySwipe && motion.event) {
               energySwipe.spawn(motion.event);
             }
-            drawRibbon(trailCanvas, video, visualTrajectory.samples(), now);
+            if (ribbonRenderer && video.videoWidth > 0 && video.videoHeight > 0) {
+              ribbonRenderer.resize(
+                video.videoWidth,
+                video.videoHeight,
+                window.devicePixelRatio || 1,
+              );
+              ribbonRenderer.render(
+                buildTrailGeometry(
+                  visualTrajectory.samples(),
+                  now,
+                  video.videoWidth,
+                  video.videoHeight,
+                ),
+                now,
+              );
+            }
             if (visibility.skeleton) {
               drawPose(overlayCanvas, video, result);
             }

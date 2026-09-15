@@ -38,7 +38,7 @@ h1 {
 
 #webcam,
 #aura,
-#trail,
+#ribbon-gl,
 #effects,
 #overlay {
   display: block;
@@ -50,7 +50,7 @@ h1 {
 }
 
 #aura,
-#trail,
+#ribbon-gl,
 #effects,
 #overlay {
   position: absolute;
@@ -63,8 +63,9 @@ h1 {
   z-index: 1;
 }
 
-#trail {
+#ribbon-gl {
   z-index: 2;
+  pointer-events: none;
 }
 
 #effects {
