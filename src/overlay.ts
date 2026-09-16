@@ -4,10 +4,12 @@ import {
   type PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 
+export type PoseOverlay = Pick<PoseLandmarkerResult, "landmarks">;
+
 export function drawPose(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
-  result: PoseLandmarkerResult,
+  result: PoseOverlay,
 ): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) {

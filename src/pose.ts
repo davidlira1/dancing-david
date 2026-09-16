@@ -1,30 +1,30 @@
 import {
-  FilesetResolver,
   PoseLandmarker,
+  type NormalizedLandmark,
   type PoseLandmarkerCallback,
+  type PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
+import { createVisionTask } from "./vision-runtime.ts";
 
-const WASM_PATH =
-  "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm";
 const MODEL_PATH =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task";
+  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
-async function createWithDelegate(
+function createWithDelegate(
   delegate: "GPU" | "CPU",
 ): Promise<PoseLandmarker> {
-  const vision = await FilesetResolver.forVisionTasks(WASM_PATH);
-
-  return PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: MODEL_PATH,
-      delegate,
-    },
-    // GPU masks are bound to this canvas; without it, mask readback is empty.
-    canvas: document.createElement("canvas"),
-    runningMode: "VIDEO",
-    numPoses: 1,
-    outputSegmentationMasks: true,
-  });
+  return createVisionTask((vision) =>
+    PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: MODEL_PATH,
+        delegate,
+      },
+      // GPU masks are bound to this canvas; without it, mask readback is empty.
+      canvas: document.createElement("canvas"),
+      runningMode: "VIDEO",
+      numPoses: 1,
+      outputSegmentationMasks: true,
+    }),
+  );
 }
 
 export async function createPoseLandmarker(): Promise<PoseLandmarker> {
@@ -45,4 +45,22 @@ export function detectPose(
   onResult: PoseLandmarkerCallback,
 ): void {
   landmarker.detectForVideo(video, timestampMs, onResult);
+}
+
+function copyNormalized(point: NormalizedLandmark): NormalizedLandmark {
+  return {
+    x: point.x,
+    y: point.y,
+    z: point.z,
+    visibility: point.visibility,
+  };
+}
+
+/** Landmarks only — masks stay inside the detect callback and die with it. */
+export function copyPoseLandmarks(
+  result: PoseLandmarkerResult,
+): { landmarks: NormalizedLandmark[][] } {
+  return {
+    landmarks: result.landmarks.map((set) => set.map(copyNormalized)),
+  };
 }

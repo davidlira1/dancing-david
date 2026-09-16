@@ -1,11 +1,23 @@
-import type { PoseLandmarkerResult } from "@mediapipe/tasks-vision";
 import "./style.css";
 import { drawAura } from "./aura.ts";
 import { startCamera } from "./camera.ts";
 import { createEnergySwipeEffect } from "./energy-swipe.ts";
 import { drawPose } from "./overlay.ts";
-import { createPoseLandmarker, detectPose } from "./pose.ts";
+import {
+  copyPoseLandmarks,
+  createPoseLandmarker,
+  detectPose,
+} from "./pose.ts";
+import {
+  createHandLandmarker,
+  createVisionTiming,
+  detectHands,
+  toRawHands,
+} from "./hands.ts";
+import { createHandsTracker } from "./hand-state.ts";
+import { drawHandDebug, formatHandsDebug } from "./hand-debug.ts";
 import { lastPersonMask, updatePersonMask } from "./segmentation.ts";
+import { isWasmFault, nextVideoTimestamp } from "./vision-runtime.ts";
 import { createSceneDepth } from "./scene-depth.ts";
 import {
   createBodyDepthField,
@@ -48,6 +60,7 @@ const sceneDepth = createSceneDepth({ invertZ: vfxConfig.invertZ });
 const visualRight = createVisualTrajectory(sceneDepth);
 const visualLeft = createVisualTrajectory(sceneDepth);
 const bodyDepth = createBodyDepthField();
+const handsTracker = createHandsTracker(sceneDepth);
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
@@ -59,6 +72,20 @@ function applyContinuityThresholds(): void {
   };
   visualRight.setContinuityThresholds(thresholds);
   visualLeft.setContinuityThresholds(thresholds);
+  handsTracker.setContinuityThresholds(thresholds);
+}
+
+function applyHandSettings(): void {
+  handsTracker.setSwapHandedness(vfxConfig.swapHandedness);
+  handsTracker.setMinConfidence(vfxConfig.minHandConfidence);
+  handsTracker.setDepthGains({
+    scaleDepthGain: vfxConfig.handScaleDepthGain,
+    localZGain: vfxConfig.handLocalZGain,
+  });
+  if (!vfxConfig.handsEnabled) {
+    // Turning hand tracking off must not leave a stale hand behind.
+    handsTracker.noteMissedFrame(performance.now());
+  }
 }
 
 const vfxControls = createVfxControls({
@@ -67,20 +94,24 @@ const vfxControls = createVfxControls({
     visualRight.setDurationMs(vfxConfig.trailDurationMs);
     visualLeft.setDurationMs(vfxConfig.trailDurationMs);
     applyContinuityThresholds();
+    applyHandSettings();
     if (sceneDepth.setInvertZ(vfxConfig.invertZ)) {
       visualRight.handleSceneInvert();
       visualLeft.handleSceneInvert();
+      handsTracker.handleSceneInvert();
     }
   },
   onRecalibrate: () => {
     sceneDepth.recalibrate();
     visualRight.handleSceneRecalibrate();
     visualLeft.handleSceneRecalibrate();
+    handsTracker.handleSceneRecalibrate();
   },
 });
 visualRight.setDurationMs(vfxConfig.trailDurationMs);
 visualLeft.setDurationMs(vfxConfig.trailDurationMs);
 applyContinuityThresholds();
+applyHandSettings();
 let lastSwipeLabel = "—";
 let lastMotion: MotionSnapshot | null = null;
 
@@ -89,6 +120,7 @@ const visibility = {
   aura: true,
   energySwipe: true,
   tracking: false,
+  hands: false,
 };
 
 const skeletonToggle =
@@ -97,6 +129,7 @@ const auraToggle = document.querySelector<HTMLButtonElement>("#toggle-aura")!;
 const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")!;
 const trackingToggle =
   document.querySelector<HTMLButtonElement>("#toggle-tracking")!;
+const handsToggle = document.querySelector<HTMLButtonElement>("#toggle-hands")!;
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -157,6 +190,14 @@ trackingToggle.addEventListener("click", () => {
   }
 });
 
+handsToggle.addEventListener("click", () => {
+  visibility.hands = !visibility.hands;
+  syncToggle(handsToggle, "Hand Debug", visibility.hands);
+  if (!visibility.hands && !visibility.skeleton && !visibility.tracking) {
+    clearCanvas(overlayCanvas);
+  }
+});
+
 function updateMotionDebug(motion: MotionSnapshot): void {
   if (motion.event) {
     lastSwipeLabel = `SWIPE ${motion.event.direction}`;
@@ -168,9 +209,21 @@ function updateMotionDebug(motion: MotionSnapshot): void {
 }
 
 async function main(): Promise<void> {
-  setStatus("Loading pose model…");
-  const landmarker = await createPoseLandmarker();
-  setStatus("Pose model ready. Click Start camera.");
+  setStatus("Loading vision models…");
+  let handModelError: string | null = null;
+  // One wasm ModuleFactory at a time: pose first, then hands.
+  let poseLandmarker: Awaited<ReturnType<typeof createPoseLandmarker>> | null =
+    await createPoseLandmarker();
+  let handLandmarker = await createHandLandmarker().catch((error: unknown) => {
+    handModelError = error instanceof Error ? error.message : String(error);
+    console.error("Hand landmarker unavailable:", error);
+    return null;
+  });
+  setStatus(
+    handLandmarker
+      ? "Vision models ready. Click Start camera."
+      : "Pose model ready (hand model unavailable). Click Start camera.",
+  );
   startButton.disabled = false;
 
   startButton.addEventListener("click", async () => {
@@ -185,13 +238,163 @@ async function main(): Promise<void> {
       );
 
       let lastVideoTime = -1;
-      let lastPoseResult: PoseLandmarkerResult | null = null;
+      let lastPoseOverlay: ReturnType<typeof copyPoseLandmarks> | null = null;
       let lastRawWrist: { x: number; y: number } | null = null;
       let lastVisibility = 0;
       const visionTimes: number[] = [];
       const renderTimes: number[] = [];
+      const poseTiming = createVisionTiming();
+      const handTiming = createVisionTiming();
+      let visionFrameIndex = 0;
+      let handsDue = false;
+      let handsStarved = false;
+      let lastPoseTs = -1;
+      let lastHandTs = -1;
+      let handTicks = 0;
+      let handRawCount = 0;
+      let poseFault: string | null = null;
+      let handFault: string | null = null;
+      let stage = "idle";
 
-      const tick = (): void => {
+      const disablePose = (error: unknown): void => {
+        poseFault = error instanceof Error ? error.message : String(error);
+        poseLandmarker = null;
+        console.error("Pose landmarker wasm fault:", error);
+      };
+
+      const disableHands = (error: unknown): void => {
+        handFault = error instanceof Error ? error.message : String(error);
+        handLandmarker = null;
+        handsTracker.noteMissedFrame(performance.now());
+        console.error("Hand landmarker wasm fault:", error);
+      };
+
+      const applyPoseResult = (
+        result: Parameters<typeof copyPoseLandmarks>[0],
+        timestampMs: number,
+      ): void => {
+        const mask = updatePersonMask(result);
+        const overlay = copyPoseLandmarks(result);
+        lastPoseOverlay = overlay;
+        const landmarks = overlay.landmarks[0];
+        if (visibility.aura) {
+          drawAura(auraCanvas, video, mask?.canvas ?? null);
+        }
+        const field = bodyDepth.update(
+          landmarks,
+          mask,
+          sceneDepth,
+          vfxConfig.bodyInfluenceRadius,
+        );
+        ribbonRenderer?.setOcclusionSources(
+          mask,
+          field,
+          sceneDepth.isReady(),
+        );
+        wristTrail.update(landmarks, timestampMs);
+        const rightWrist = landmarks?.[RIGHT_WRIST_INDEX];
+        const leftWrist = landmarks?.[LEFT_WRIST_INDEX];
+        visualRight.setViewport(video.videoWidth, video.videoHeight);
+        visualLeft.setViewport(video.videoWidth, video.videoHeight);
+        const minVisibility = vfxConfig.minContinuityVisibility;
+        if (rightWrist && rightWrist.visibility >= minVisibility) {
+          lastRawWrist = { x: rightWrist.x, y: rightWrist.y };
+          lastVisibility = rightWrist.visibility;
+          visualRight.update({
+            x: rightWrist.x,
+            y: rightWrist.y,
+            z: rightWrist.z,
+            t: timestampMs,
+            visibility: rightWrist.visibility,
+          });
+        } else {
+          lastRawWrist = null;
+          lastVisibility = rightWrist?.visibility ?? 0;
+          visualRight.noteMissedFrame(timestampMs, lastVisibility);
+        }
+        if (leftWrist && leftWrist.visibility >= minVisibility) {
+          visualLeft.update({
+            x: leftWrist.x,
+            y: leftWrist.y,
+            z: leftWrist.z,
+            t: timestampMs,
+            visibility: leftWrist.visibility,
+          });
+        } else {
+          visualLeft.noteMissedFrame(timestampMs, leftWrist?.visibility ?? 0);
+        }
+        const motion = motionAnalyzer.analyze(wristTrail.samples(), timestampMs);
+        lastMotion = motion;
+        if (!visibility.tracking) {
+          updateMotionDebug(motion);
+        }
+        if (visibility.energySwipe && motion.event) {
+          energySwipe.spawn(motion.event);
+        }
+      };
+
+      const runPose = (now: number): void => {
+        if (!poseLandmarker || video.videoWidth === 0) {
+          return;
+        }
+        const timestampMs = nextVideoTimestamp(lastPoseTs, now);
+        lastPoseTs = timestampMs;
+        const poseStarted = performance.now();
+        stage = "pose detect";
+        try {
+          detectPose(poseLandmarker, video, timestampMs, (result) => {
+            stage = "pose callback";
+            poseTiming.note(performance.now() - poseStarted, timestampMs);
+            visionTimes.push(timestampMs);
+            while (
+              visionTimes.length > 0 &&
+              visionTimes[0] < timestampMs - 1000
+            ) {
+              visionTimes.shift();
+            }
+            applyPoseResult(result, timestampMs);
+          });
+        } catch (error) {
+          if (isWasmFault(error)) {
+            disablePose(error);
+            return;
+          }
+          throw error;
+        }
+      };
+
+      const runHands = (now: number): void => {
+        if (!handLandmarker || video.videoWidth === 0) {
+          return;
+        }
+        const timestampMs = nextVideoTimestamp(lastHandTs, now);
+        lastHandTs = timestampMs;
+        handTicks += 1;
+        stage = "hands detect";
+        let detection;
+        try {
+          detection = detectHands(handLandmarker, video, timestampMs);
+        } catch (error) {
+          handsTracker.noteMissedFrame(timestampMs);
+          if (isWasmFault(error)) {
+            disableHands(error);
+            return;
+          }
+          handFault = error instanceof Error ? error.message : String(error);
+          return;
+        }
+        handRawCount = detection.result.landmarks.length;
+        handTiming.note(detection.inferenceMs, timestampMs);
+        handsTracker.setViewport(video.videoWidth, video.videoHeight);
+        handsTracker.update(
+          toRawHands(detection.result),
+          lastPoseOverlay?.landmarks[0],
+          timestampMs,
+        );
+      };
+
+      const frame = (): void => {
+        stage = "frame start";
         const now = performance.now();
         renderTimes.push(now);
         while (renderTimes.length > 0 && renderTimes[0] < now - 1000) {
@@ -200,73 +403,40 @@ async function main(): Promise<void> {
         while (visionTimes.length > 0 && visionTimes[0] < now - 1000) {
           visionTimes.shift();
         }
-        if (video.currentTime !== lastVideoTime) {
+
+        const newFrame = video.currentTime !== lastVideoTime;
+        if (newFrame) {
           lastVideoTime = video.currentTime;
-          detectPose(landmarker, video, now, (result) => {
-            lastPoseResult = result;
-            visionTimes.push(now);
-            while (visionTimes.length > 0 && visionTimes[0] < now - 1000) {
-              visionTimes.shift();
-            }
-            const mask = updatePersonMask(result);
-            if (visibility.aura) {
-              drawAura(auraCanvas, video, mask?.canvas ?? null);
-            }
-            const field = bodyDepth.update(
-              result.landmarks[0],
-              mask,
-              sceneDepth,
-              vfxConfig.bodyInfluenceRadius,
-            );
-            ribbonRenderer?.setOcclusionSources(
-              mask,
-              field,
-              sceneDepth.isReady(),
-            );
-            wristTrail.update(result.landmarks[0], now);
-            const landmarks = result.landmarks[0];
-            const rightWrist = landmarks?.[RIGHT_WRIST_INDEX];
-            const leftWrist = landmarks?.[LEFT_WRIST_INDEX];
-            // Continuity thresholds are in pixels, so it needs the real frame size.
-            visualRight.setViewport(video.videoWidth, video.videoHeight);
-            visualLeft.setViewport(video.videoWidth, video.videoHeight);
-            const minVisibility = vfxConfig.minContinuityVisibility;
-            if (rightWrist && rightWrist.visibility >= minVisibility) {
-              lastRawWrist = { x: rightWrist.x, y: rightWrist.y };
-              lastVisibility = rightWrist.visibility;
-              visualRight.update({
-                x: rightWrist.x,
-                y: rightWrist.y,
-                z: rightWrist.z,
-                t: now,
-                visibility: rightWrist.visibility,
-              });
-            } else {
-              lastRawWrist = null;
-              lastVisibility = rightWrist?.visibility ?? 0;
-              visualRight.noteMissedFrame(now, lastVisibility);
-            }
-            if (leftWrist && leftWrist.visibility >= minVisibility) {
-              visualLeft.update({
-                x: leftWrist.x,
-                y: leftWrist.y,
-                z: leftWrist.z,
-                t: now,
-                visibility: leftWrist.visibility,
-              });
-            } else {
-              visualLeft.noteMissedFrame(now, leftWrist?.visibility ?? 0);
-            }
-            const motion = motionAnalyzer.analyze(wristTrail.samples(), now);
-            lastMotion = motion;
-            if (!visibility.tracking) {
-              updateMotionDebug(motion);
-            }
-            if (visibility.energySwipe && motion.event) {
-              energySwipe.spawn(motion.event);
-            }
-          });
+          visionFrameIndex += 1;
+          const cadence = Math.max(1, Math.round(vfxConfig.handCadence));
+          if (
+            handLandmarker &&
+            vfxConfig.handsEnabled &&
+            visionFrameIndex % cadence === 0
+          ) {
+            handsDue = true;
+          }
         }
+
+        // At most one detectForVideo per animation frame. Hands take an idle
+        // tick, or steal one pose slot if the camera never skips a frame.
+        if (
+          handsDue &&
+          handLandmarker &&
+          vfxConfig.handsEnabled &&
+          (!newFrame || handsStarved)
+        ) {
+          runHands(now);
+          handsDue = false;
+          handsStarved = false;
+        } else if (newFrame && poseLandmarker) {
+          runPose(now);
+          if (handsDue) {
+            handsStarved = true;
+          }
+        }
+
+        const handsState = handsTracker.snapshot();
 
         visualRight.setDurationMs(vfxConfig.trailDurationMs);
         visualLeft.setDurationMs(vfxConfig.trailDurationMs);
@@ -338,8 +508,8 @@ async function main(): Promise<void> {
         }
 
         let overlayDrawn = false;
-        if (visibility.skeleton && lastPoseResult) {
-          drawPose(overlayCanvas, video, lastPoseResult);
+        if (visibility.skeleton && lastPoseOverlay) {
+          drawPose(overlayCanvas, video, lastPoseOverlay);
           overlayDrawn = true;
         }
         if (vfxConfig.segmentationDebug || vfxConfig.bodyDepthDebug) {
@@ -359,6 +529,23 @@ async function main(): Promise<void> {
             [...visualRight.strokeStarts(), ...visualLeft.strokeStarts()],
             !overlayDrawn,
           );
+          overlayDrawn = true;
+        }
+        if (visibility.hands) {
+          drawHandDebug(overlayCanvas, video, handsState, {
+            showNormal: vfxConfig.handNormalDebug,
+            clear: !overlayDrawn,
+            note: !handLandmarker
+              ? handFault
+                ? `HANDS: wasm fault — using pose only`
+                : "HANDS: model unavailable"
+              : !vfxConfig.handsEnabled
+                ? "HANDS: tracking off"
+                : poseFault
+                  ? "POSE: wasm fault — hands only"
+                  : null,
+            diagnostic: `raw ${handRawCount} · ticks ${handTicks}`,
+          });
           overlayDrawn = true;
         }
 
@@ -418,11 +605,58 @@ async function main(): Promise<void> {
             formatContinuityDebug(
               visualRight.continuityDebug(),
               visualRight.strokeCount(),
-            );
+            ) +
+            `\nPose: ${poseTiming.snapshot(now).inferenceMs.toFixed(1)} ms` +
+            " (call to callback)\n" +
+            (handLandmarker
+              ? formatHandsDebug(
+                  handsState,
+                  handTiming.snapshot(now),
+                  `ticks: ${handTicks}  raw: ${handRawCount}`,
+                )
+              : handFault
+                ? `Hands: wasm fault — using pose only\n${handFault}`
+                : `Hands: model unavailable (${handModelError ?? "unknown"})`) +
+            (poseFault ? `\nPose: wasm fault — ${poseFault}` : "");
         }
 
         if (visibility.energySwipe) {
           energySwipe.draw(effectsCanvas, video, now);
+        }
+      };
+
+      let loopErrorMessage = "";
+      let loopErrorCount = 0;
+
+      /**
+       * A throw inside the animation callback would otherwise stop scheduling
+       * and freeze every canvas, which looks identical to a dead toggle. Keep
+       * the loop running and put the reason where it can be read.
+       */
+      const tick = (): void => {
+        try {
+          frame();
+        } catch (error) {
+          loopErrorCount += 1;
+          const message =
+            error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error);
+          if (isWasmFault(error)) {
+            if (stage.startsWith("hands")) {
+              disableHands(error);
+            } else if (stage.startsWith("pose")) {
+              disablePose(error);
+            }
+          }
+          if (message !== loopErrorMessage) {
+            loopErrorMessage = message;
+            console.error("Render loop error:", error);
+          }
+          setStatus(`Frame error x${loopErrorCount} @ ${stage} — ${message}`);
+          debugEl.textContent =
+            `FRAME ERROR x${loopErrorCount}\n` +
+            `stage: ${stage}\n${message}`;
         }
         requestAnimationFrame(tick);
       };

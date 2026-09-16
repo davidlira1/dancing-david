@@ -5,6 +5,11 @@ import {
   MAX_TRACKING_GAP_MS,
   MIN_CONTINUITY_VISIBILITY,
 } from "../stroke-continuity.ts";
+import {
+  HAND_LOCAL_Z_GAIN,
+  HAND_SCALE_DEPTH_GAIN,
+} from "../hand-depth.ts";
+import { MIN_HAND_CONFIDENCE } from "../hand-state.ts";
 
 export const RIBBON_WIDTH = 32;
 export const CORE_WIDTH = 0.11;
@@ -110,6 +115,13 @@ export type RibbonVfxConfig = {
   continuityReacquirePx: number;
   minContinuityVisibility: number;
   strokeDebug: boolean;
+  handCadence: number;
+  handScaleDepthGain: number;
+  handLocalZGain: number;
+  minHandConfidence: number;
+  handsEnabled: boolean;
+  handNormalDebug: boolean;
+  swapHandedness: boolean;
 };
 
 function clamp01(value: number): number {
@@ -183,6 +195,13 @@ export const DEFAULT_RIBBON_VFX_CONFIG: RibbonVfxConfig = {
   continuityReacquirePx: MAX_REACQUIRE_DISTANCE_PX,
   minContinuityVisibility: MIN_CONTINUITY_VISIBILITY,
   strokeDebug: false,
+  handCadence: 1,
+  handScaleDepthGain: HAND_SCALE_DEPTH_GAIN,
+  handLocalZGain: HAND_LOCAL_Z_GAIN,
+  minHandConfidence: MIN_HAND_CONFIDENCE,
+  handsEnabled: true,
+  handNormalDebug: true,
+  swapHandedness: true,
 };
 
 export function createRibbonVfxConfig(): RibbonVfxConfig {
@@ -235,6 +254,13 @@ export function assignRibbonVfxConfig(
   target.continuityReacquirePx = source.continuityReacquirePx;
   target.minContinuityVisibility = source.minContinuityVisibility;
   target.strokeDebug = source.strokeDebug;
+  target.handCadence = source.handCadence;
+  target.handScaleDepthGain = source.handScaleDepthGain;
+  target.handLocalZGain = source.handLocalZGain;
+  target.minHandConfidence = source.minHandConfidence;
+  target.handsEnabled = source.handsEnabled;
+  target.handNormalDebug = source.handNormalDebug;
+  target.swapHandedness = source.swapHandedness;
 }
 
 export const THIN_RIBBON_VFX_PRESET: RibbonVfxConfig = {

@@ -27,11 +27,12 @@ function readConfidence(
   }
 
   const floats = mask.getAsFloat32Array();
-  if (into && into.length === floats.length) {
-    into.set(floats);
-    return into;
-  }
-  return floats;
+  const values =
+    into && into.length === floats.length
+      ? into
+      : new Float32Array(floats.length);
+  values.set(floats);
+  return values;
 }
 
 export function updatePersonMask(

@@ -37,6 +37,10 @@ const SLIDERS: SliderSpec[] = [
   { key: "continuityGapMs", suffix: " ms", digits: 0 },
   { key: "continuityReacquirePx", suffix: " px", digits: 0 },
   { key: "minContinuityVisibility", suffix: "", digits: 2 },
+  { key: "handCadence", suffix: "x", digits: 0 },
+  { key: "handScaleDepthGain", suffix: "", digits: 2 },
+  { key: "handLocalZGain", suffix: "", digits: 2 },
+  { key: "minHandConfidence", suffix: "", digits: 2 },
 ];
 
 const COLOR_KEYS = [
@@ -55,6 +59,9 @@ const CHECKBOX_KEYS = [
   "bodyDepthDebug",
   "occlusionViz",
   "strokeDebug",
+  "handsEnabled",
+  "handNormalDebug",
+  "swapHandedness",
 ] as const;
 
 const DEPTH_METER_RANGE = 0.4;
