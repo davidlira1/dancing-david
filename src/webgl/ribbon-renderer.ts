@@ -7,6 +7,7 @@ import {
 } from "../body-depth.ts";
 import type { PersonMask } from "../segmentation.ts";
 import { createBloomRenderer, type BloomRenderer } from "./bloom-renderer.ts";
+import { createOrbPass, type OrbVisual } from "./orb-renderer.ts";
 import {
   disposeFrameTarget,
   ensureFrameTarget,
@@ -69,7 +70,12 @@ export type RibbonRenderer = {
     body: BodyDepthField | null,
     calibrated: boolean,
   ): void;
-  render(passes: RibbonPass[], nowMs: number, vfx: RibbonVfxConfig): void;
+  render(
+    passes: RibbonPass[],
+    nowMs: number,
+    vfx: RibbonVfxConfig,
+    orb?: OrbVisual | null,
+  ): void;
   lastHead(): { x: number; y: number; z: number } | null;
   stats(): RibbonStats;
   dispose(): void;
@@ -444,6 +450,8 @@ export function createRibbonRenderer(
   );
   gpu.bindTexture(gpu.TEXTURE_2D, null);
 
+  const orbPass = createOrbPass(gpu);
+
   const uResolution = gpu.getUniformLocation(program, "u_resolution");
   const uMaxWidth = gpu.getUniformLocation(program, "u_maxWidth");
   const uMinWidthScale = gpu.getUniformLocation(program, "u_minWidthScale");
@@ -688,7 +696,12 @@ export function createRibbonRenderer(
       gpu.bindTexture(gpu.TEXTURE_2D, null);
     },
 
-    render(passes: RibbonPass[], nowMs: number, vfx: RibbonVfxConfig): void {
+    render(
+      passes: RibbonPass[],
+      nowMs: number,
+      vfx: RibbonVfxConfig,
+      orb?: OrbVisual | null,
+    ): void {
       if (!ribbonTarget) {
         return;
       }
@@ -704,6 +717,19 @@ export function createRibbonRenderer(
 
       for (let i = 0; i < passes.length; i++) {
         drawTrail(passes[i], nowMs);
+      }
+      if (orb && orbPass) {
+        orbPass.draw(
+          orb,
+          nowMs,
+          videoWidth,
+          videoHeight,
+          vfx,
+          personMaskTexture,
+          bodyDepthTexture,
+          hasMask,
+          calibrated,
+        );
       }
 
       const bloomTexture = bloom.blur(ribbonTarget.texture, vfx.bloomRadius);
@@ -735,6 +761,7 @@ export function createRibbonRenderer(
       gpu.deleteBuffer(buffer);
       gpu.deleteVertexArray(vao);
       gpu.deleteProgram(program);
+      orbPass?.dispose();
     },
   };
 }

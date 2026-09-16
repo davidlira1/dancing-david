@@ -116,6 +116,18 @@ h1 {
   white-space: pre-wrap;
 }
 
+#energy-orb {
+  display: grid;
+  gap: 8px;
+}
+
+#orb-debug {
+  margin: 0;
+  font: 12px/1.45 ui-monospace, Consolas, monospace;
+  color: #c8c8d0;
+  white-space: pre-wrap;
+}
+
 .controls {
   flex: 0 0 320px;
   width: 320px;
@@ -153,14 +165,16 @@ h1 {
   color: #8b8b96;
 }
 
-#ribbon-vfx {
+#ribbon-vfx,
+#energy-orb {
   width: 100%;
   padding: 12px 14px 14px;
   border-radius: 8px;
   background: #1a1b22;
 }
 
-#ribbon-vfx header {
+#ribbon-vfx header,
+#energy-orb header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -168,7 +182,8 @@ h1 {
   margin-bottom: 8px;
 }
 
-#ribbon-vfx h2 {
+#ribbon-vfx h2,
+#energy-orb h2 {
   margin: 0;
   font-size: 1rem;
   font-weight: 600;
@@ -206,7 +221,8 @@ h1 {
   color: #8b8b96;
 }
 
-#ribbon-vfx label {
+#ribbon-vfx label,
+#energy-orb label {
   display: grid;
   gap: 4px;
   font-size: 0.85rem;
@@ -219,7 +235,8 @@ h1 {
   align-items: center;
 }
 
-#ribbon-vfx input[type="range"] {
+#ribbon-vfx input[type="range"],
+#energy-orb input[type="range"] {
   width: 100%;
 }
 

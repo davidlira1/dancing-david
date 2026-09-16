@@ -22,6 +22,10 @@ import {
   drawGestureDebug,
   formatGestureDebug,
 } from "./gestures/gesture-debug.ts";
+import { createEnergyOrbController } from "./orb/energy-orb.ts";
+import { createEnergyOrbConfig } from "./orb/orb-config.ts";
+import { createOrbControls, formatOrbDebug } from "./orb/orb-debug.ts";
+import type { OrbVisual } from "./webgl/orb-renderer.ts";
 import { lastPersonMask, updatePersonMask } from "./segmentation.ts";
 import { isWasmFault, nextVideoTimestamp } from "./vision-runtime.ts";
 import { createSceneDepth } from "./scene-depth.ts";
@@ -86,6 +90,9 @@ const bodyDepth = createBodyDepthField();
 const handsTracker = createHandsTracker(sceneDepth);
 const gestureEngine = createGestureEngine();
 const gestureLog = createGestureEventLog();
+const orbConfig = createEnergyOrbConfig();
+const orbController = createEnergyOrbController(orbConfig);
+const orbControls = createOrbControls({ config: orbConfig });
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
@@ -222,6 +229,7 @@ const visibility = {
   tracking: false,
   hands: false,
   gestures: false,
+  energyOrb: true,
 };
 
 const skeletonToggle =
@@ -233,6 +241,9 @@ const trackingToggle =
 const handsToggle = document.querySelector<HTMLButtonElement>("#toggle-hands")!;
 const gesturesToggle =
   document.querySelector<HTMLButtonElement>("#toggle-gestures")!;
+const energyOrbToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-energy-orb")!;
+syncToggle(energyOrbToggle, "Energy Orb", visibility.energyOrb);
 
 function overlayIdle(): boolean {
   return (
@@ -241,6 +252,40 @@ function overlayIdle(): boolean {
     !visibility.hands &&
     !visibility.gestures
   );
+}
+
+function toOrbVisual(
+  orb: ReturnType<typeof orbController.update>,
+  videoWidth: number,
+  videoHeight: number,
+): { visual: OrbVisual | null; displayRadius: number | null } {
+  if (orb.state === "INACTIVE" || videoWidth <= 0 || videoHeight <= 0) {
+    return { visual: null, displayRadius: null };
+  }
+  const chargeScale = 0.15 + 0.85 * orb.charge;
+  const { perspectiveScale } = ribbonPerspectiveFromTracked(orb.depth, {
+    depthEnabled: vfxConfig.depthEnabled,
+    depthStrength: orbConfig.depthStrength,
+    perspectiveStrength: vfxConfig.perspectiveStrength,
+    minPerspectiveScale: vfxConfig.minPerspectiveScale,
+    maxPerspectiveScale: vfxConfig.maxPerspectiveScale,
+  });
+  const displayRadius =
+    orb.interactionRadius * perspectiveScale * chargeScale * (0.72 + 0.28 * orb.fade);
+  return {
+    visual: {
+      x: orb.x * videoWidth,
+      y: orb.y * videoHeight,
+      depth: orb.depth,
+      displayRadius,
+      intensity: orb.intensity * orbConfig.intensity * chargeScale * orb.fade,
+      charge: orb.charge,
+      fade: orb.fade,
+      ageMs: orb.ageMs,
+      bloomStrength: orbConfig.bloomStrength,
+    },
+    displayRadius,
+  };
 }
 
 function setStatus(message: string): void {
@@ -321,6 +366,11 @@ gesturesToggle.addEventListener("click", () => {
       clearCanvas(overlayCanvas);
     }
   }
+});
+
+energyOrbToggle.addEventListener("click", () => {
+  visibility.energyOrb = !visibility.energyOrb;
+  syncToggle(energyOrbToggle, "Energy Orb", visibility.energyOrb);
 });
 
 leftIndexTrailToggle.addEventListener("click", () => {
@@ -606,11 +656,24 @@ async function main(): Promise<void> {
         const handsState = handsTracker.snapshot();
         const gesture = gestureEngine.update(handsState, now);
         gestureLog.push(gesture.events);
+        const energyOrb = orbController.update(
+          handsState,
+          now,
+          visibility.energyOrb,
+        );
+        const orbDraw = toOrbVisual(
+          energyOrb,
+          video.videoWidth,
+          video.videoHeight,
+        );
+        orbControls.updateReadout(
+          formatOrbDebug(energyOrb, orbDraw.displayRadius),
+        );
         if (visibility.gestures) {
-          gestureDebugEl.textContent = formatGestureDebug(
-            gesture.snapshot,
-            gestureLog.lines(),
-          );
+          gestureDebugEl.textContent =
+            formatGestureDebug(gesture.snapshot, gestureLog.lines()) +
+            "\n\n" +
+            formatOrbDebug(energyOrb, orbDraw.displayRadius);
         }
         driveIndexTrail(
           visualLeftIndex,
@@ -729,7 +792,7 @@ async function main(): Promise<void> {
           if (passes.length > 0 && !passes.some((pass) => pass.captureHead)) {
             passes[0].captureHead = true;
           }
-          ribbonRenderer.render(passes, now, vfxConfig);
+          ribbonRenderer.render(passes, now, vfxConfig, orbDraw.visual);
         }
 
         let overlayDrawn = false;
