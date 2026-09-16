@@ -16,6 +16,12 @@ import {
 } from "./hands.ts";
 import { createHandsTracker, type HandState } from "./hand-state.ts";
 import { drawHandDebug, formatHandsDebug } from "./hand-debug.ts";
+import { createGestureEngine } from "./gestures/gesture-engine.ts";
+import {
+  createGestureEventLog,
+  drawGestureDebug,
+  formatGestureDebug,
+} from "./gestures/gesture-debug.ts";
 import { lastPersonMask, updatePersonMask } from "./segmentation.ts";
 import { isWasmFault, nextVideoTimestamp } from "./vision-runtime.ts";
 import { createSceneDepth } from "./scene-depth.ts";
@@ -62,6 +68,7 @@ const effectsCanvas = document.querySelector<HTMLCanvasElement>("#effects")!;
 const startButton = document.querySelector<HTMLButtonElement>("#start")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const debugEl = document.querySelector<HTMLPreElement>("#motion-debug")!;
+const gestureDebugEl = document.querySelector<HTMLPreElement>("#gesture-debug")!;
 const wristTrail = createWristTrail();
 const vfxConfig = createRibbonVfxConfig();
 const sceneDepth = createSceneDepth({ invertZ: vfxConfig.invertZ });
@@ -77,6 +84,8 @@ const visualRightIndex = createVisualTrajectory(sceneDepth, {
 });
 const bodyDepth = createBodyDepthField();
 const handsTracker = createHandsTracker(sceneDepth);
+const gestureEngine = createGestureEngine();
+const gestureLog = createGestureEventLog();
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
@@ -212,6 +221,7 @@ const visibility = {
   energySwipe: false,
   tracking: false,
   hands: false,
+  gestures: false,
 };
 
 const skeletonToggle =
@@ -221,6 +231,17 @@ const energyToggle = document.querySelector<HTMLButtonElement>("#toggle-energy")
 const trackingToggle =
   document.querySelector<HTMLButtonElement>("#toggle-tracking")!;
 const handsToggle = document.querySelector<HTMLButtonElement>("#toggle-hands")!;
+const gesturesToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-gestures")!;
+
+function overlayIdle(): boolean {
+  return (
+    !visibility.skeleton &&
+    !visibility.tracking &&
+    !visibility.hands &&
+    !visibility.gestures
+  );
+}
 
 function setStatus(message: string): void {
   statusEl.textContent = message;
@@ -247,7 +268,7 @@ function syncToggle(
 skeletonToggle.addEventListener("click", () => {
   visibility.skeleton = !visibility.skeleton;
   syncToggle(skeletonToggle, "Skeleton", visibility.skeleton);
-  if (!visibility.skeleton) {
+  if (overlayIdle()) {
     clearCanvas(overlayCanvas);
   }
 });
@@ -272,7 +293,7 @@ trackingToggle.addEventListener("click", () => {
   visibility.tracking = !visibility.tracking;
   syncToggle(trackingToggle, "DEBUG TRACKING", visibility.tracking);
   if (!visibility.tracking) {
-    if (!visibility.skeleton) {
+    if (overlayIdle()) {
       clearCanvas(overlayCanvas);
     }
     if (lastMotion) {
@@ -284,8 +305,21 @@ trackingToggle.addEventListener("click", () => {
 handsToggle.addEventListener("click", () => {
   visibility.hands = !visibility.hands;
   syncToggle(handsToggle, "Hand Debug", visibility.hands);
-  if (!visibility.hands && !visibility.skeleton && !visibility.tracking) {
+  if (overlayIdle()) {
     clearCanvas(overlayCanvas);
+  }
+});
+
+gesturesToggle.addEventListener("click", () => {
+  visibility.gestures = !visibility.gestures;
+  syncToggle(gesturesToggle, "Gesture Debug", visibility.gestures);
+  if (visibility.gestures) {
+    gestureDebugEl.removeAttribute("hidden");
+  } else {
+    gestureDebugEl.setAttribute("hidden", "");
+    if (overlayIdle()) {
+      clearCanvas(overlayCanvas);
+    }
   }
 });
 
@@ -570,6 +604,14 @@ async function main(): Promise<void> {
         }
 
         const handsState = handsTracker.snapshot();
+        const gesture = gestureEngine.update(handsState, now);
+        gestureLog.push(gesture.events);
+        if (visibility.gestures) {
+          gestureDebugEl.textContent = formatGestureDebug(
+            gesture.snapshot,
+            gestureLog.lines(),
+          );
+        }
         driveIndexTrail(
           visualLeftIndex,
           handsState.left,
@@ -736,6 +778,16 @@ async function main(): Promise<void> {
             showLeftIndexSource: vfxConfig.leftIndexTrail,
             showRightIndexSource: vfxConfig.rightIndexTrail,
           });
+          overlayDrawn = true;
+        }
+        if (visibility.gestures) {
+          drawGestureDebug(
+            overlayCanvas,
+            video,
+            handsState,
+            gesture.snapshot,
+            !overlayDrawn,
+          );
           overlayDrawn = true;
         }
 

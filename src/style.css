@@ -103,11 +103,17 @@ h1 {
   cursor: not-allowed;
 }
 
-#motion-debug {
+#motion-debug,
+#gesture-debug {
   margin: 0;
   font: 14px/1.45 ui-monospace, Consolas, monospace;
   color: #c8c8d0;
   min-width: 16ch;
+}
+
+#gesture-debug {
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 .controls {
