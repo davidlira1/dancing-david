@@ -14,7 +14,7 @@ import {
   detectHands,
   toRawHands,
 } from "./hands.ts";
-import { createHandsTracker } from "./hand-state.ts";
+import { createHandsTracker, type HandState } from "./hand-state.ts";
 import { drawHandDebug, formatHandsDebug } from "./hand-debug.ts";
 import { lastPersonMask, updatePersonMask } from "./segmentation.ts";
 import { isWasmFault, nextVideoTimestamp } from "./vision-runtime.ts";
@@ -36,15 +36,23 @@ import { formatContinuityDebug } from "./stroke-continuity.ts";
 import { formatDepthDebug } from "./depth.ts";
 import { ribbonPerspectiveFromTracked } from "./webgl/projection.ts";
 import { createVfxControls } from "./vfx-controls.ts";
-import { createRibbonRenderer } from "./webgl/ribbon-renderer.ts";
-import { createRibbonVfxConfig } from "./webgl/visual.ts";
+import { createRibbonRenderer, type RibbonPass } from "./webgl/ribbon-renderer.ts";
+import {
+  createRibbonVfxConfig,
+  INDEX_TRAIL_COLORS,
+  RIGHT_INDEX_TRAIL_COLORS,
+} from "./webgl/visual.ts";
 import {
   createWristTrail,
   LEFT_WRIST_INDEX,
   RIGHT_WRIST_INDEX,
 } from "./wrist-history.ts";
 import { createMotionAnalyzer, type MotionSnapshot } from "./motion.ts";
-import { createVisualTrajectory } from "./visual-trajectory.ts";
+import {
+  createVisualTrajectory,
+  FINGER_JUMP_DISTANCE,
+  FINGER_SMOOTHING_TAU_MS,
+} from "./visual-trajectory.ts";
 
 const video = document.querySelector<HTMLVideoElement>("#webcam")!;
 const overlayCanvas = document.querySelector<HTMLCanvasElement>("#overlay")!;
@@ -59,11 +67,51 @@ const vfxConfig = createRibbonVfxConfig();
 const sceneDepth = createSceneDepth({ invertZ: vfxConfig.invertZ });
 const visualRight = createVisualTrajectory(sceneDepth);
 const visualLeft = createVisualTrajectory(sceneDepth);
+const visualLeftIndex = createVisualTrajectory(sceneDepth, {
+  smoothingTauMs: FINGER_SMOOTHING_TAU_MS,
+  jumpDistance: FINGER_JUMP_DISTANCE,
+});
+const visualRightIndex = createVisualTrajectory(sceneDepth, {
+  smoothingTauMs: FINGER_SMOOTHING_TAU_MS,
+  jumpDistance: FINGER_JUMP_DISTANCE,
+});
 const bodyDepth = createBodyDepthField();
 const handsTracker = createHandsTracker(sceneDepth);
 const motionAnalyzer = createMotionAnalyzer();
 const energySwipe = createEnergySwipeEffect();
 const ribbonRenderer = createRibbonRenderer(ribbonCanvas);
+
+type IndexTrajectory = ReturnType<typeof createVisualTrajectory>;
+
+function driveIndexTrail(
+  trajectory: IndexTrajectory,
+  hand: HandState | null,
+  enabled: boolean,
+  lastTs: { value: number },
+  now: number,
+): void {
+  if (!enabled) {
+    lastTs.value = -1;
+    return;
+  }
+  if (hand?.tracked) {
+    const tip = hand.fingertips.index;
+    if (hand.timestamp !== lastTs.value) {
+      lastTs.value = hand.timestamp;
+      trajectory.update({
+        x: tip.x,
+        y: tip.y,
+        trackedDepth: tip.trackedDepth,
+        t: hand.timestamp,
+        visibility: hand.confidence,
+      });
+    } else {
+      trajectory.prune(now);
+    }
+    return;
+  }
+  trajectory.noteMissedFrame(now, hand?.confidence ?? 0);
+}
 function applyContinuityThresholds(): void {
   const thresholds = {
     minVisibility: vfxConfig.minContinuityVisibility,
@@ -72,6 +120,8 @@ function applyContinuityThresholds(): void {
   };
   visualRight.setContinuityThresholds(thresholds);
   visualLeft.setContinuityThresholds(thresholds);
+  visualLeftIndex.setContinuityThresholds(thresholds);
+  visualRightIndex.setContinuityThresholds(thresholds);
   handsTracker.setContinuityThresholds(thresholds);
 }
 
@@ -85,19 +135,53 @@ function applyHandSettings(): void {
   if (!vfxConfig.handsEnabled) {
     // Turning hand tracking off must not leave a stale hand behind.
     handsTracker.noteMissedFrame(performance.now());
+    visualLeftIndex.clear();
+    visualRightIndex.clear();
+  }
+  if (!vfxConfig.leftIndexTrail) {
+    visualLeftIndex.clear();
+  }
+  if (!vfxConfig.rightIndexTrail) {
+    visualRightIndex.clear();
+  }
+  if (!vfxConfig.wristTrail) {
+    visualRight.clear();
+    visualLeft.clear();
   }
 }
+
+const leftIndexTrailToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-left-index-trail")!;
+const rightIndexTrailToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-right-index-trail")!;
+const wristTrailToggle =
+  document.querySelector<HTMLButtonElement>("#toggle-wrist-trail")!;
 
 const vfxControls = createVfxControls({
   config: vfxConfig,
   onChange: () => {
     visualRight.setDurationMs(vfxConfig.trailDurationMs);
     visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+    visualLeftIndex.setDurationMs(vfxConfig.trailDurationMs);
+    visualRightIndex.setDurationMs(vfxConfig.trailDurationMs);
     applyContinuityThresholds();
     applyHandSettings();
+    syncToggle(
+      leftIndexTrailToggle,
+      "Left Index Trail",
+      vfxConfig.leftIndexTrail,
+    );
+    syncToggle(
+      rightIndexTrailToggle,
+      "Right Index Trail",
+      vfxConfig.rightIndexTrail,
+    );
+    syncToggle(wristTrailToggle, "Wrist Trail", vfxConfig.wristTrail);
     if (sceneDepth.setInvertZ(vfxConfig.invertZ)) {
       visualRight.handleSceneInvert();
       visualLeft.handleSceneInvert();
+      visualLeftIndex.handleSceneInvert();
+      visualRightIndex.handleSceneInvert();
       handsTracker.handleSceneInvert();
     }
   },
@@ -105,20 +189,27 @@ const vfxControls = createVfxControls({
     sceneDepth.recalibrate();
     visualRight.handleSceneRecalibrate();
     visualLeft.handleSceneRecalibrate();
+    visualLeftIndex.handleSceneRecalibrate();
+    visualRightIndex.handleSceneRecalibrate();
     handsTracker.handleSceneRecalibrate();
   },
 });
 visualRight.setDurationMs(vfxConfig.trailDurationMs);
 visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+visualLeftIndex.setDurationMs(vfxConfig.trailDurationMs);
+visualRightIndex.setDurationMs(vfxConfig.trailDurationMs);
 applyContinuityThresholds();
 applyHandSettings();
+syncToggle(leftIndexTrailToggle, "Left Index Trail", vfxConfig.leftIndexTrail);
+syncToggle(rightIndexTrailToggle, "Right Index Trail", vfxConfig.rightIndexTrail);
+syncToggle(wristTrailToggle, "Wrist Trail", vfxConfig.wristTrail);
 let lastSwipeLabel = "—";
 let lastMotion: MotionSnapshot | null = null;
 
 const visibility = {
-  skeleton: true,
-  aura: true,
-  energySwipe: true,
+  skeleton: false,
+  aura: false,
+  energySwipe: false,
   tracking: false,
   hands: false,
 };
@@ -198,6 +289,38 @@ handsToggle.addEventListener("click", () => {
   }
 });
 
+leftIndexTrailToggle.addEventListener("click", () => {
+  vfxConfig.leftIndexTrail = !vfxConfig.leftIndexTrail;
+  syncToggle(leftIndexTrailToggle, "Left Index Trail", vfxConfig.leftIndexTrail);
+  vfxControls.syncFromConfig();
+  if (!vfxConfig.leftIndexTrail) {
+    visualLeftIndex.clear();
+  }
+});
+
+rightIndexTrailToggle.addEventListener("click", () => {
+  vfxConfig.rightIndexTrail = !vfxConfig.rightIndexTrail;
+  syncToggle(
+    rightIndexTrailToggle,
+    "Right Index Trail",
+    vfxConfig.rightIndexTrail,
+  );
+  vfxControls.syncFromConfig();
+  if (!vfxConfig.rightIndexTrail) {
+    visualRightIndex.clear();
+  }
+});
+
+wristTrailToggle.addEventListener("click", () => {
+  vfxConfig.wristTrail = !vfxConfig.wristTrail;
+  syncToggle(wristTrailToggle, "Wrist Trail", vfxConfig.wristTrail);
+  vfxControls.syncFromConfig();
+  if (!vfxConfig.wristTrail) {
+    visualRight.clear();
+    visualLeft.clear();
+  }
+});
+
 function updateMotionDebug(motion: MotionSnapshot): void {
   if (motion.event) {
     lastSwipeLabel = `SWIPE ${motion.event.direction}`;
@@ -250,6 +373,8 @@ async function main(): Promise<void> {
       let handsStarved = false;
       let lastPoseTs = -1;
       let lastHandTs = -1;
+      const lastLeftIndexTs = { value: -1 };
+      const lastRightIndexTs = { value: -1 };
       let handTicks = 0;
       let handRawCount = 0;
       let poseFault: string | null = null;
@@ -296,31 +421,39 @@ async function main(): Promise<void> {
         const leftWrist = landmarks?.[LEFT_WRIST_INDEX];
         visualRight.setViewport(video.videoWidth, video.videoHeight);
         visualLeft.setViewport(video.videoWidth, video.videoHeight);
+        visualLeftIndex.setViewport(video.videoWidth, video.videoHeight);
+        visualRightIndex.setViewport(video.videoWidth, video.videoHeight);
         const minVisibility = vfxConfig.minContinuityVisibility;
         if (rightWrist && rightWrist.visibility >= minVisibility) {
           lastRawWrist = { x: rightWrist.x, y: rightWrist.y };
           lastVisibility = rightWrist.visibility;
-          visualRight.update({
-            x: rightWrist.x,
-            y: rightWrist.y,
-            z: rightWrist.z,
-            t: timestampMs,
-            visibility: rightWrist.visibility,
-          });
+          if (vfxConfig.wristTrail) {
+            visualRight.update({
+              x: rightWrist.x,
+              y: rightWrist.y,
+              z: rightWrist.z,
+              t: timestampMs,
+              visibility: rightWrist.visibility,
+            });
+          }
         } else {
           lastRawWrist = null;
           lastVisibility = rightWrist?.visibility ?? 0;
-          visualRight.noteMissedFrame(timestampMs, lastVisibility);
+          if (vfxConfig.wristTrail) {
+            visualRight.noteMissedFrame(timestampMs, lastVisibility);
+          }
         }
         if (leftWrist && leftWrist.visibility >= minVisibility) {
-          visualLeft.update({
-            x: leftWrist.x,
-            y: leftWrist.y,
-            z: leftWrist.z,
-            t: timestampMs,
-            visibility: leftWrist.visibility,
-          });
-        } else {
+          if (vfxConfig.wristTrail) {
+            visualLeft.update({
+              x: leftWrist.x,
+              y: leftWrist.y,
+              z: leftWrist.z,
+              t: timestampMs,
+              visibility: leftWrist.visibility,
+            });
+          }
+        } else if (vfxConfig.wristTrail) {
           visualLeft.noteMissedFrame(timestampMs, leftWrist?.visibility ?? 0);
         }
         const motion = motionAnalyzer.analyze(wristTrail.samples(), timestampMs);
@@ -437,9 +570,25 @@ async function main(): Promise<void> {
         }
 
         const handsState = handsTracker.snapshot();
+        driveIndexTrail(
+          visualLeftIndex,
+          handsState.left,
+          vfxConfig.leftIndexTrail,
+          lastLeftIndexTs,
+          now,
+        );
+        driveIndexTrail(
+          visualRightIndex,
+          handsState.right,
+          vfxConfig.rightIndexTrail,
+          lastRightIndexTs,
+          now,
+        );
 
         visualRight.setDurationMs(vfxConfig.trailDurationMs);
         visualLeft.setDurationMs(vfxConfig.trailDurationMs);
+        visualLeftIndex.setDurationMs(vfxConfig.trailDurationMs);
+        visualRightIndex.setDurationMs(vfxConfig.trailDurationMs);
         const depthSnap = visualRight.depthSnapshot();
         const head = ribbonRenderer?.lastHead() ?? null;
         const bodyAtHead =
@@ -485,26 +634,60 @@ async function main(): Promise<void> {
             video.videoHeight,
             window.devicePixelRatio || 1,
           );
-          ribbonRenderer.render(
-            {
-              right: buildTrailGeometry(
-                visualRight.samples(),
+          const passes: RibbonPass[] = [];
+          if (vfxConfig.wristTrail) {
+            passes.push(
+              {
+                strokes: buildTrailGeometry(
+                  visualRight.samples(),
+                  now,
+                  video.videoWidth,
+                  video.videoHeight,
+                  vfxConfig.trailDurationMs,
+                ),
+                captureHead: true,
+              },
+              {
+                strokes: buildTrailGeometry(
+                  visualLeft.samples(),
+                  now,
+                  video.videoWidth,
+                  video.videoHeight,
+                  vfxConfig.trailDurationMs,
+                ),
+              },
+            );
+          }
+          if (vfxConfig.leftIndexTrail) {
+            passes.push({
+              strokes: buildTrailGeometry(
+                visualLeftIndex.samples(),
                 now,
                 video.videoWidth,
                 video.videoHeight,
                 vfxConfig.trailDurationMs,
               ),
-              left: buildTrailGeometry(
-                visualLeft.samples(),
+              widthScale: vfxConfig.indexWidthScale,
+              ...INDEX_TRAIL_COLORS,
+            });
+          }
+          if (vfxConfig.rightIndexTrail) {
+            passes.push({
+              strokes: buildTrailGeometry(
+                visualRightIndex.samples(),
                 now,
                 video.videoWidth,
                 video.videoHeight,
                 vfxConfig.trailDurationMs,
               ),
-            },
-            now,
-            vfxConfig,
-          );
+              widthScale: vfxConfig.indexWidthScale,
+              ...RIGHT_INDEX_TRAIL_COLORS,
+            });
+          }
+          if (passes.length > 0 && !passes.some((pass) => pass.captureHead)) {
+            passes[0].captureHead = true;
+          }
+          ribbonRenderer.render(passes, now, vfxConfig);
         }
 
         let overlayDrawn = false;
@@ -526,7 +709,12 @@ async function main(): Promise<void> {
           drawStrokeDebug(
             overlayCanvas,
             video,
-            [...visualRight.strokeStarts(), ...visualLeft.strokeStarts()],
+            [
+              ...visualRight.strokeStarts(),
+              ...visualLeft.strokeStarts(),
+              ...visualLeftIndex.strokeStarts(),
+              ...visualRightIndex.strokeStarts(),
+            ],
             !overlayDrawn,
           );
           overlayDrawn = true;
@@ -545,6 +733,8 @@ async function main(): Promise<void> {
                   ? "POSE: wasm fault — hands only"
                   : null,
             diagnostic: `raw ${handRawCount} · ticks ${handTicks}`,
+            showLeftIndexSource: vfxConfig.leftIndexTrail,
+            showRightIndexSource: vfxConfig.rightIndexTrail,
           });
           overlayDrawn = true;
         }

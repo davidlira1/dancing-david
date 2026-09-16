@@ -41,6 +41,7 @@ const SLIDERS: SliderSpec[] = [
   { key: "handScaleDepthGain", suffix: "", digits: 2 },
   { key: "handLocalZGain", suffix: "", digits: 2 },
   { key: "minHandConfidence", suffix: "", digits: 2 },
+  { key: "indexWidthScale", suffix: "", digits: 2 },
 ];
 
 const COLOR_KEYS = [
@@ -62,6 +63,9 @@ const CHECKBOX_KEYS = [
   "handsEnabled",
   "handNormalDebug",
   "swapHandedness",
+  "wristTrail",
+  "leftIndexTrail",
+  "rightIndexTrail",
 ] as const;
 
 const DEPTH_METER_RANGE = 0.4;

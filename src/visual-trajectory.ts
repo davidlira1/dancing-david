@@ -17,19 +17,34 @@ export const VISUAL_CONFIDENT_VISIBILITY = 0.65;
 export const VISUAL_UNTRUSTED_TAU_MULT = 1.25;
 export const VISUAL_UNTRUSTED_STEP_SCALE = 0.75;
 
-/** A raw wrist observation handed to the trajectory. */
-export type WristObservation = {
+/** A spatial observation handed to the trajectory. */
+export type SpatialObservation = {
   x: number;
   y: number;
+  /** Pose-style raw z. Ignored when `trackedDepth` is set. */
   z?: number;
+  /** Scene-convention depth already processed by HandState. */
+  trackedDepth?: number;
   t: number;
   visibility?: number;
 };
 
+/** @deprecated Use SpatialObservation. Wrist path is unchanged. */
+export type WristObservation = SpatialObservation;
+
 /** A stored sample. `strokeId` marks which continuous stroke it belongs to. */
-export type VisualSample = WristObservation & {
+export type VisualSample = SpatialObservation & {
   strokeId: number;
 };
+
+export type VisualTrajectoryOptions = {
+  smoothingTauMs?: number;
+  jumpDistance?: number;
+};
+
+/** Finger motion is smaller and faster than a wrist; keep the head on the tip. */
+export const FINGER_SMOOTHING_TAU_MS = 8;
+export const FINGER_JUMP_DISTANCE = 0.16;
 
 export type JumpDebug = {
   clamped: boolean;
@@ -78,13 +93,14 @@ export function clampVisualJump(
   dtMs: number,
   recentSpeed: number,
   trust: number,
+  jumpDistance = VISUAL_JUMP_DISTANCE,
 ): { x: number; y: number; requested: number; allowed: number; clamped: boolean } {
   const dx = raw.x - origin.x;
   const dy = raw.y - origin.y;
   const requested = Math.hypot(dx, dy);
   const speedCap = recentSpeed * Math.max(dtMs, 1) * VISUAL_JUMP_SPEED_MULT;
   const allowed =
-    Math.max(VISUAL_JUMP_DISTANCE, speedCap) *
+    Math.max(jumpDistance, speedCap) *
     lerp(VISUAL_UNTRUSTED_STEP_SCALE, 1, trust);
 
   if (requested <= allowed || requested === 0) {
@@ -101,7 +117,12 @@ export function clampVisualJump(
   };
 }
 
-export function createVisualTrajectory(scene: SceneDepth) {
+export function createVisualTrajectory(
+  scene: SceneDepth,
+  options: VisualTrajectoryOptions = {},
+) {
+  const smoothingTauMs = options.smoothingTauMs ?? POSITION_SMOOTHING_TAU_MS;
+  const jumpDistance = options.jumpDistance ?? VISUAL_JUMP_DISTANCE;
   const points: VisualSample[] = [];
   const depth = createDepthTracker(scene);
   const continuity = createStrokeContinuity();
@@ -110,6 +131,21 @@ export function createVisualTrajectory(scene: SceneDepth) {
   let durationMs = VISUAL_TRAIL_DURATION_MS;
   let jumpDebug: JumpDebug = { clamped: false, requested: 0, allowed: 0 };
   let currentStrokeId = 0;
+
+  function sampleTrackedDepth(point: SpatialObservation): number {
+    if (typeof point.trackedDepth === "number") {
+      return point.trackedDepth;
+    }
+    return depth.update(point.z ?? 0, point.t, point.visibility ?? 0)
+      .trackedDepth;
+  }
+
+  function continuityDepth(point: SpatialObservation): number {
+    if (typeof point.trackedDepth === "number") {
+      return point.trackedDepth;
+    }
+    return scene.toTracked(point.z ?? 0);
+  }
 
   function pushFiltered(point: VisualSample): void {
     const prev = points[points.length - 1];
@@ -144,7 +180,7 @@ export function createVisualTrajectory(scene: SceneDepth) {
   }
 
   return {
-    update(point: WristObservation): void {
+    update(point: SpatialObservation): void {
       prune(points, point.t, durationMs);
 
       // Compare unfiltered tracked depth so a real jump is not smeared away by
@@ -153,7 +189,7 @@ export function createVisualTrajectory(scene: SceneDepth) {
         {
           x: point.x,
           y: point.y,
-          trackedDepth: scene.toTracked(point.z ?? 0),
+          trackedDepth: continuityDepth(point),
           t: point.t,
           visibility: point.visibility ?? 0,
         },
@@ -161,26 +197,22 @@ export function createVisualTrajectory(scene: SceneDepth) {
         scene.isReady(),
       );
 
-      if (verdict.startNewStroke) {
+      if (verdict.startNewStroke && typeof point.trackedDepth !== "number") {
         depth.resetFilter();
       }
       currentStrokeId = verdict.strokeId;
-      const depthSnap = depth.update(
-        point.z ?? 0,
-        point.t,
-        point.visibility ?? 0,
-      );
+      const trackedDepth = sampleTrackedDepth(point);
 
       if (verdict.startNewStroke || !smoothed) {
-        // Start the new stroke exactly at the wrist: no easing from the old
-        // endpoint, so the ribbon emerges from the hand.
+        // Start the new stroke exactly at the observed point: no easing from
+        // the old endpoint, so the ribbon emerges from the source.
         smoothed = { x: point.x, y: point.y, t: point.t };
         recentRawSpeed = 0;
-        jumpDebug = { clamped: false, requested: 0, allowed: VISUAL_JUMP_DISTANCE };
+        jumpDebug = { clamped: false, requested: 0, allowed: jumpDistance };
         pushFiltered({
           x: point.x,
           y: point.y,
-          z: depthSnap.trackedDepth,
+          z: trackedDepth,
           t: point.t,
           visibility: point.visibility,
           strokeId: currentStrokeId,
@@ -196,6 +228,7 @@ export function createVisualTrajectory(scene: SceneDepth) {
         dt,
         recentRawSpeed,
         trust,
+        jumpDistance,
       );
       jumpDebug = {
         clamped: clamped.clamped,
@@ -203,8 +236,7 @@ export function createVisualTrajectory(scene: SceneDepth) {
         allowed: clamped.allowed,
       };
       const tau =
-        POSITION_SMOOTHING_TAU_MS *
-        lerp(VISUAL_UNTRUSTED_TAU_MULT, 1, trust);
+        smoothingTauMs * lerp(VISUAL_UNTRUSTED_TAU_MULT, 1, trust);
       const alpha = dt === 0 ? 1 : 1 - Math.exp(-dt / tau);
       const next = {
         x: smoothed.x + alpha * (clamped.x - smoothed.x),
@@ -220,7 +252,7 @@ export function createVisualTrajectory(scene: SceneDepth) {
       pushFiltered({
         x: smoothed.x,
         y: smoothed.y,
-        z: depthSnap.trackedDepth,
+        z: trackedDepth,
         t: point.t,
         visibility: point.visibility,
         strokeId: currentStrokeId,

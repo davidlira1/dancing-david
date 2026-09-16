@@ -122,6 +122,10 @@ export type RibbonVfxConfig = {
   handsEnabled: boolean;
   handNormalDebug: boolean;
   swapHandedness: boolean;
+  wristTrail: boolean;
+  leftIndexTrail: boolean;
+  rightIndexTrail: boolean;
+  indexWidthScale: number;
 };
 
 function clamp01(value: number): number {
@@ -201,8 +205,24 @@ export const DEFAULT_RIBBON_VFX_CONFIG: RibbonVfxConfig = {
   minHandConfidence: MIN_HAND_CONFIDENCE,
   handsEnabled: true,
   handNormalDebug: true,
-  swapHandedness: true,
+  swapHandedness: false,
+  wristTrail: false,
+  leftIndexTrail: true,
+  rightIndexTrail: true,
+  indexWidthScale: 0.45,
 };
+
+export const INDEX_TRAIL_COLORS = {
+  coreColor: "#fff4c8",
+  bodyColor: "#ff9a3c",
+  edgeColor: "#ff4ec8",
+} as const;
+
+export const RIGHT_INDEX_TRAIL_COLORS = {
+  coreColor: "#e8fbff",
+  bodyColor: "#3cd4ff",
+  edgeColor: "#4a7dff",
+} as const;
 
 export function createRibbonVfxConfig(): RibbonVfxConfig {
   return cloneRibbonVfxConfig(DEFAULT_RIBBON_VFX_CONFIG);
@@ -261,6 +281,10 @@ export function assignRibbonVfxConfig(
   target.handsEnabled = source.handsEnabled;
   target.handNormalDebug = source.handNormalDebug;
   target.swapHandedness = source.swapHandedness;
+  target.wristTrail = source.wristTrail;
+  target.leftIndexTrail = source.leftIndexTrail;
+  target.rightIndexTrail = source.rightIndexTrail;
+  target.indexWidthScale = source.indexWidthScale;
 }
 
 export const THIN_RIBBON_VFX_PRESET: RibbonVfxConfig = {

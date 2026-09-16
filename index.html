@@ -24,11 +24,14 @@
 Direction: NONE
 Last event: —</pre>
           <div id="layer-toggles">
-            <button type="button" id="toggle-skeleton" aria-pressed="true">Skeleton: ON</button>
-            <button type="button" id="toggle-aura" aria-pressed="true">Aura: ON</button>
-            <button type="button" id="toggle-energy" aria-pressed="true">Energy Swipe: ON</button>
+            <button type="button" id="toggle-skeleton" aria-pressed="false">Skeleton: OFF</button>
+            <button type="button" id="toggle-aura" aria-pressed="false">Aura: OFF</button>
+            <button type="button" id="toggle-energy" aria-pressed="false">Energy Swipe: OFF</button>
             <button type="button" id="toggle-tracking" aria-pressed="false">DEBUG TRACKING: OFF</button>
             <button type="button" id="toggle-hands" aria-pressed="false">Hand Debug: OFF</button>
+            <button type="button" id="toggle-wrist-trail" aria-pressed="false">Wrist Trail: OFF</button>
+            <button type="button" id="toggle-left-index-trail" aria-pressed="true">Left Index Trail: ON</button>
+            <button type="button" id="toggle-right-index-trail" aria-pressed="true">Right Index Trail: ON</button>
           </div>
           <div id="color-schemes">
             <button type="button" id="scheme-electric" aria-pressed="true">Electric</button>
@@ -272,6 +275,25 @@ Last event: —</pre>
               <label class="vfx-check">
                 <input id="vfx-swapHandedness" type="checkbox" />
                 <span>Swap Handedness</span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-wristTrail" type="checkbox" />
+                <span>Wrist Trail</span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-leftIndexTrail" type="checkbox" />
+                <span>Left Index Trail</span>
+              </label>
+              <label class="vfx-check">
+                <input id="vfx-rightIndexTrail" type="checkbox" />
+                <span>Right Index Trail</span>
+              </label>
+              <label>
+                <span>Index Width Scale</span>
+                <span class="vfx-row">
+                  <input id="vfx-indexWidthScale" type="range" min="0.1" max="1.5" step="0.05" />
+                  <span id="vfx-indexWidthScale-value">0.45</span>
+                </span>
               </label>
               <p class="vfx-section">Color</p>
               <label>

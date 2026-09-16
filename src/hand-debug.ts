@@ -162,6 +162,27 @@ function drawBadge(
   ctx.restore();
 }
 
+function drawIndexSourceLabel(
+  ctx: CanvasRenderingContext2D,
+  point: SpatialPoint,
+  width: number,
+  height: number,
+): void {
+  const x = point.x * width;
+  const y = point.y * height;
+  ctx.save();
+  ctx.translate(x, y - INDEX_TIP_RADIUS - 12);
+  ctx.scale(-1, 1);
+  ctx.font = "bold 14px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ff5ce0";
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.7)";
+  ctx.lineWidth = 4;
+  ctx.strokeText("INDEX", 0, 0);
+  ctx.fillText("INDEX", 0, 0);
+  ctx.restore();
+}
+
 export function drawHandDebug(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
@@ -172,6 +193,8 @@ export function drawHandDebug(
     note?: string | null;
     /** Appended when no hand is held, to separate "none" from "not running". */
     diagnostic?: string | null;
+    showLeftIndexSource?: boolean;
+    showRightIndexSource?: boolean;
   },
 ): void {
   const ctx = canvas.getContext("2d");
@@ -189,6 +212,23 @@ export function drawHandDebug(
     if (hand) {
       drawHand(ctx, hand, canvas.width, canvas.height, options.showNormal);
     }
+  }
+
+  if (options.showLeftIndexSource && hands.left?.fingertips.index) {
+    drawIndexSourceLabel(
+      ctx,
+      hands.left.fingertips.index,
+      canvas.width,
+      canvas.height,
+    );
+  }
+  if (options.showRightIndexSource && hands.right?.fingertips.index) {
+    drawIndexSourceLabel(
+      ctx,
+      hands.right.fingertips.index,
+      canvas.width,
+      canvas.height,
+    );
   }
 
   // With no hands in frame the overlay is empty, which is indistinguishable

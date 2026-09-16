@@ -52,9 +52,14 @@ export type RibbonStats = {
 /** One continuous stroke: cubics that are guaranteed not to span a tracking gap. */
 export type RibbonStroke = TimedSegment[];
 
-export type RibbonTrails = {
-  right: RibbonStroke[];
-  left: RibbonStroke[];
+export type RibbonPass = {
+  strokes: RibbonStroke[];
+  widthScale?: number;
+  coreColor?: string;
+  bodyColor?: string;
+  edgeColor?: string;
+  /** True only for the ribbon whose head is used for occlusion debug. */
+  captureHead?: boolean;
 };
 
 export type RibbonRenderer = {
@@ -64,7 +69,7 @@ export type RibbonRenderer = {
     body: BodyDepthField | null,
     calibrated: boolean,
   ): void;
-  render(trails: RibbonTrails, nowMs: number, vfx: RibbonVfxConfig): void;
+  render(passes: RibbonPass[], nowMs: number, vfx: RibbonVfxConfig): void;
   lastHead(): { x: number; y: number; z: number } | null;
   stats(): RibbonStats;
   dispose(): void;
@@ -486,10 +491,10 @@ export function createRibbonRenderer(
   gpu.blendFunc(gpu.SRC_ALPHA, gpu.ONE);
   gpu.clearColor(0, 0, 0, 0);
 
-  function drawRibbonMesh(vertexCount: number): void {
-    const core = hexToRgb(activeVfx.coreColor);
-    const body = hexToRgb(activeVfx.bodyColor);
-    const edge = hexToRgb(activeVfx.edgeColor);
+  function drawRibbonMesh(vertexCount: number, pass: RibbonPass): void {
+    const core = hexToRgb(pass.coreColor ?? activeVfx.coreColor);
+    const body = hexToRgb(pass.bodyColor ?? activeVfx.bodyColor);
+    const edge = hexToRgb(pass.edgeColor ?? activeVfx.edgeColor);
     const mid: [number, number, number] = [
       (body[0] + edge[0]) * 0.5,
       (body[1] + edge[1]) * 0.5,
@@ -497,7 +502,10 @@ export function createRibbonRenderer(
     ];
     gpu.useProgram(program);
     gpu.uniform2f(uResolution, videoWidth, videoHeight);
-    gpu.uniform1f(uMaxWidth, activeVfx.ribbonWidth);
+    gpu.uniform1f(
+      uMaxWidth,
+      activeVfx.ribbonWidth * (pass.widthScale ?? 1),
+    );
     gpu.uniform1f(uMinWidthScale, activeVfx.tailWidthScale);
     gpu.uniform1f(uCoreWidth, activeVfx.coreWidth);
     gpu.uniform1f(uEdgeSoftness, activeVfx.edgeSoftness);
@@ -546,6 +554,7 @@ export function createRibbonRenderer(
     segments: TimedSegment[],
     nowMs: number,
     reportHead: boolean,
+    pass: RibbonPass,
   ): void {
     if (segments.length === 0) {
       return;
@@ -578,20 +587,22 @@ export function createRibbonRenderer(
       vertices.subarray(0, vertexCount * FLOATS_PER_VERTEX),
     );
     gpu.bindBuffer(gpu.ARRAY_BUFFER, null);
-    drawRibbonMesh(vertexCount);
+    drawRibbonMesh(vertexCount, pass);
   }
 
   /** Each stroke is tessellated, resampled and drawn independently. */
-  function drawTrail(
-    strokes: RibbonStroke[],
-    nowMs: number,
-    isRight: boolean,
-  ): void {
-    if (isRight) {
+  function drawTrail(pass: RibbonPass, nowMs: number): void {
+    const captureHead = Boolean(pass.captureHead);
+    if (captureHead) {
       head = null;
     }
-    for (let i = 0; i < strokes.length; i++) {
-      drawStroke(strokes[i], nowMs, isRight && i === strokes.length - 1);
+    for (let i = 0; i < pass.strokes.length; i++) {
+      drawStroke(
+        pass.strokes[i],
+        nowMs,
+        captureHead && i === pass.strokes.length - 1,
+        pass,
+      );
     }
   }
 
@@ -677,7 +688,7 @@ export function createRibbonRenderer(
       gpu.bindTexture(gpu.TEXTURE_2D, null);
     },
 
-    render(trails: RibbonTrails, nowMs: number, vfx: RibbonVfxConfig): void {
+    render(passes: RibbonPass[], nowMs: number, vfx: RibbonVfxConfig): void {
       if (!ribbonTarget) {
         return;
       }
@@ -691,8 +702,9 @@ export function createRibbonRenderer(
       gpu.blendFunc(gpu.SRC_ALPHA, gpu.ONE);
       gpu.clear(gpu.COLOR_BUFFER_BIT);
 
-      drawTrail(trails.right, nowMs, true);
-      drawTrail(trails.left, nowMs, false);
+      for (let i = 0; i < passes.length; i++) {
+        drawTrail(passes[i], nowMs);
+      }
 
       const bloomTexture = bloom.blur(ribbonTarget.texture, vfx.bloomRadius);
       bindDefaultFramebuffer();

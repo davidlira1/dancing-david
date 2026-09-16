@@ -100,11 +100,11 @@ export type HandsState = {
 };
 
 /**
- * MediaPipe derives handedness assuming mirrored (selfie) input, while this app
- * feeds unmirrored frames, so the label is swapped once here. LEFT/RIGHT always
- * mean the performer's own hand, matching pose landmarks 15/16.
+ * LEFT/RIGHT mean the performer's own hand, matching pose landmarks 15/16.
+ * On this unmirrored webcam MediaPipe's label already matches, so the default
+ * is not to swap. The VFX checkbox remains the runtime escape hatch.
  */
-export const SWAP_MEDIAPIPE_HANDEDNESS = true;
+export const SWAP_MEDIAPIPE_HANDEDNESS = false;
 
 export const MIN_HAND_CONFIDENCE = 0.5;
 
